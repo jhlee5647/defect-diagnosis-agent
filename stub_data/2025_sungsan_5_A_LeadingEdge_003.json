@@ -1,0 +1,150 @@
+{
+  "info": {
+    "db_name": "PositiveDB",
+    "generator_name": "풍력발전기",
+    "model_name": "Vestas-V80",
+    "part_tag": "Blade A",
+    "part_side_tag": "Leading Edge",
+    "installation": "중기",
+    "license": "㈜어드바이저로렌"
+  },
+  "categories": [
+    {
+      "id": 1,
+      "name": "Contamination",
+      "supercategory": "풍력 외부"
+    },
+    {
+      "id": 2,
+      "name": "Tape Damage",
+      "supercategory": "풍력 외부"
+    },
+    {
+      "id": 3,
+      "name": "Paint Damage",
+      "supercategory": "풍력 외부"
+    },
+    {
+      "id": 4,
+      "name": "La Exposure",
+      "supercategory": "풍력 내부"
+    },
+    {
+      "id": 5,
+      "name": "La Damage",
+      "supercategory": "풍력 내부"
+    },
+    {
+      "id": 6,
+      "name": "Bond Crack",
+      "supercategory": "풍력 내부"
+    },
+    {
+      "id": 7,
+      "name": "Receptor Damage",
+      "supercategory": "풍력 부착물"
+    },
+    {
+      "id": 8,
+      "name": "Rain Collar",
+      "supercategory": "풍력 부착물"
+    },
+    {
+      "id": 9,
+      "name": "Vortex Generator",
+      "supercategory": "풍력 부착물"
+    }
+  ],
+  "image": {
+    "id": 103,
+    "width": 8256,
+    "height": 5504,
+    "filename": "2025_sungsan_5_A_LeadingEdge_003.jpg"
+  },
+  "collection": {
+    "location": "Sungsan",
+    "datetime": "2025-04-12 10:24:00",
+    "device": "NIKON Z 7",
+    "resolution": "FX",
+    "license": "㈜보다"
+  },
+  "vision_qa": {
+    "object_description": "리딩엣지에 두 개의 결함이 관찰된다. 좌측의 페인트 손상 외에, 중앙부에 라미네이트가 노출된 영역이 확인된다. 노출부는 방향성 있는 섬유질 결이 드러나 있어 단순 오염과 구분된다. 라미네이트 노출은 마모·외부 충격에 취약해 라미네이트 데미지로 진행 가능하며, 심각도 3으로 중요한 점검 및 조치가 필요하다.",
+    "defect_detection_q": "이미지에 결함이 존재합니까?",
+    "defect_detection_q_option_a": "예",
+    "defect_detection_q_option_b": "아니요",
+    "defect_detection_q_a": "a",
+    "cropped_bbox": [
+      3800,
+      1600,
+      1920,
+      1080
+    ],
+    "defect_localization_q": "심각도가 가장 높은 결함의 위치는 어디입니까? (crop 좌표계 [x, y, w, h])",
+    "defect_localization_q_option_a": "[400.0, 400.0, 500.0, 300.0]",
+    "defect_localization_q_option_b": "[100.0, 200.0, 500.0, 300.0]",
+    "defect_localization_q_option_c": "[650.0, 400.0, 250.0, 150.0]",
+    "defect_localization_q_option_d": "[400.0, 700.0, 750.0, 300.0]",
+    "defect_localization_q_a": "a",
+    "defect_analysis_q": "해당 결함의 시각적 특징은 무엇입니까?",
+    "defect_analysis_q_option_a": "방향성 있는 섬유질 결이 드러난 라미네이트 노출면",
+    "defect_analysis_q_option_b": "표면 전체의 균일한 광택 변화",
+    "defect_analysis_q_option_c": "금속 부식으로 인한 갈색 얼룩",
+    "defect_analysis_q_option_d": "빗물 흐름 자국의 수직 줄무늬",
+    "defect_analysis_q_a": "a",
+    "defect_classification_q": "해당 결함의 유형은 무엇입니까?",
+    "defect_classification_q_option_a": "La Exposure",
+    "defect_classification_q_option_b": "Contamination",
+    "defect_classification_q_option_c": "Bond Crack",
+    "defect_classification_q_option_d": "Rain Collar",
+    "defect_classification_q_a": "a"
+  },
+  "annotations": [
+    {
+      "id": 103001,
+      "image_id": 103,
+      "category_id": 3,
+      "segmentation": [
+        2100,
+        900,
+        2450,
+        900,
+        2450,
+        1100,
+        2100,
+        1100
+      ],
+      "area": 70000.0,
+      "bbox": [
+        2100.0,
+        900.0,
+        350.0,
+        200.0
+      ],
+      "severity": 2
+    },
+    {
+      "id": 103002,
+      "image_id": 103,
+      "category_id": 4,
+      "segmentation": [
+        4200,
+        2000,
+        4700,
+        2000,
+        4700,
+        2300,
+        4200,
+        2300
+      ],
+      "area": 150000.0,
+      "bbox": [
+        4200.0,
+        2000.0,
+        500.0,
+        300.0
+      ],
+      "severity": 3
+    }
+  ]
+}

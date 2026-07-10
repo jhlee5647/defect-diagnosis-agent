@@ -1,0 +1,127 @@
+{
+  "info": {
+    "db_name": "PositiveDB",
+    "generator_name": "풍력발전기",
+    "model_name": "Vestas-V80",
+    "part_tag": "Blade A",
+    "part_side_tag": "Leading Edge",
+    "installation": "중기",
+    "license": "㈜어드바이저로렌"
+  },
+  "categories": [
+    {
+      "id": 1,
+      "name": "Contamination",
+      "supercategory": "풍력 외부"
+    },
+    {
+      "id": 2,
+      "name": "Tape Damage",
+      "supercategory": "풍력 외부"
+    },
+    {
+      "id": 3,
+      "name": "Paint Damage",
+      "supercategory": "풍력 외부"
+    },
+    {
+      "id": 4,
+      "name": "La Exposure",
+      "supercategory": "풍력 내부"
+    },
+    {
+      "id": 5,
+      "name": "La Damage",
+      "supercategory": "풍력 내부"
+    },
+    {
+      "id": 6,
+      "name": "Bond Crack",
+      "supercategory": "풍력 내부"
+    },
+    {
+      "id": 7,
+      "name": "Receptor Damage",
+      "supercategory": "풍력 부착물"
+    },
+    {
+      "id": 8,
+      "name": "Rain Collar",
+      "supercategory": "풍력 부착물"
+    },
+    {
+      "id": 9,
+      "name": "Vortex Generator",
+      "supercategory": "풍력 부착물"
+    }
+  ],
+  "image": {
+    "id": 102,
+    "width": 8256,
+    "height": 5504,
+    "filename": "2024_sungsan_5_A_LeadingEdge_002.jpg"
+  },
+  "collection": {
+    "location": "Sungsan",
+    "datetime": "2024-05-03 09:10:00",
+    "device": "NIKON Z 7",
+    "resolution": "FX",
+    "license": "㈜보다"
+  },
+  "vision_qa": {
+    "object_description": "리딩엣지 표면의 페인트 손상. 전년 대비 점검에서 관찰 대상이 되는 부위로, 손상 면적은 중간 수준이며 심각도 2에 해당한다.",
+    "defect_detection_q": "이미지에 결함이 존재합니까?",
+    "defect_detection_q_option_a": "예",
+    "defect_detection_q_option_b": "아니요",
+    "defect_detection_q_a": "a",
+    "cropped_bbox": [
+      3000,
+      640,
+      1920,
+      1080
+    ],
+    "defect_localization_q": "심각도가 가장 높은 결함의 위치는 어디입니까? (crop 좌표계 [x, y, w, h])",
+    "defect_localization_q_option_a": "[450.0, 540.0, 300.0, 180.0]",
+    "defect_localization_q_option_b": "[150.0, 340.0, 300.0, 180.0]",
+    "defect_localization_q_option_c": "[700.0, 540.0, 150.0, 90.0]",
+    "defect_localization_q_option_d": "[450.0, 840.0, 450.0, 180.0]",
+    "defect_localization_q_a": "a",
+    "defect_analysis_q": "해당 결함의 시각적 특징은 무엇입니까?",
+    "defect_analysis_q_option_a": "도막 박리로 하부 도장층이 드러난 불규칙한 밝은 영역",
+    "defect_analysis_q_option_b": "표면 전체의 균일한 광택 변화",
+    "defect_analysis_q_option_c": "금속 부식으로 인한 갈색 얼룩",
+    "defect_analysis_q_option_d": "빗물 흐름 자국의 수직 줄무늬",
+    "defect_analysis_q_a": "a",
+    "defect_classification_q": "해당 결함의 유형은 무엇입니까?",
+    "defect_classification_q_option_a": "Paint Damage",
+    "defect_classification_q_option_b": "Contamination",
+    "defect_classification_q_option_c": "Bond Crack",
+    "defect_classification_q_option_d": "Rain Collar",
+    "defect_classification_q_a": "a"
+  },
+  "annotations": [
+    {
+      "id": 102001,
+      "image_id": 102,
+      "category_id": 3,
+      "segmentation": [
+        3450,
+        1180,
+        3750,
+        1180,
+        3750,
+        1360,
+        3450,
+        1360
+      ],
+      "area": 54000.0,
+      "bbox": [
+        3450.0,
+        1180.0,
+        300.0,
+        180.0
+      ],
+      "severity": 2
+    }
+  ]
+}

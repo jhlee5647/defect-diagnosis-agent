@@ -1,0 +1,15 @@
+# 원본 데이터셋 — 커밋 금지
+data/
+
+# 인덱스 산출물 (재구축 가능)
+storage/
+
+# 시크릿
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/

@@ -1,0 +1,26 @@
+[project]
+name = "defect-diagnosis-agent"
+version = "0.1.0"
+description = "발전설비 결함 진단 멀티모달 Agentic RAG"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.0",
+    "langgraph>=0.2",
+    "langchain-openai>=0.2",
+    "chromadb>=0.5",
+    "gradio>=4.0",
+    "pillow>=10.0",
+    "python-dotenv>=1.0",
+    "torch>=2.2",
+    "transformers>=4.40",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
