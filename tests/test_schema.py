@@ -5,7 +5,7 @@ import json
 import pytest
 
 from src.config import STUB_DATA_DIR
-from src.schema import parse_label
+from src.schema import parse_filename, parse_label, primary_defect, to_crop_coords
 
 STUB_NORMAL = STUB_DATA_DIR / "2025_sungsan_2_C_PressureSide_005.json"  # 정상 사진 (annotations 키 없음)
 STUB_SINGLE = STUB_DATA_DIR / "2025_sungsan_5_A_LeadingEdge_001.json"   # 단일 결함 (페인트 sev2)
@@ -96,3 +96,69 @@ def test_valid_file_parses_all_fields():
     assert ann.bbox == (3500.0, 1200.0, 400.0, 250.0)
     assert "페인트" in doc.description
     assert doc.cropped_bbox == (3082.0, 668.0, 1920.0, 1080.0)
+
+
+# ── 사이클 2: 파일명 파싱 · 대표결함 선정 · 좌표 변환 ──────────
+
+
+def test_parse_filename_six_tokens():
+    """R4: 6토큰 풍력 파일명 → year/site/unit/blade/side/seq 분해."""
+    meta = parse_filename("2025_sungsan_5_A_LeadingEdge_056.jpg")
+    assert (meta.year, meta.site, meta.unit) == (2025, "sungsan", 5)
+    assert (meta.blade, meta.side, meta.seq) == ("A", "LeadingEdge", "056")
+
+
+def test_parse_filename_normalizes_site_case():
+    """R4: 대문자 단지명(Sungsan)은 소문자로 정규화 — 이력 DB에서 단지가 갈라지는 것 방지."""
+    assert parse_filename("2022_Sungsan_3_A_LeadingEdge_045.jpg").site == "sungsan"
+
+
+def test_parse_filename_rejects_five_tokens():
+    """R4: 태양광 형식(5토큰)은 ValueError — 조용한 오파싱 차단."""
+    with pytest.raises(ValueError):
+        parse_filename("2023_solarsido_normal_panelFront_00001.jpg")
+
+
+def test_primary_defect_severity_first():
+    """R3: 다중 결함(스텁 003: paint sev2 + la sev3) → 심각도 높은 라미네이트 노출 선정."""
+    doc = parse_label(STUB_MULTI)
+    assert len(doc.annotations) == 2
+    picked = primary_defect(doc)
+    assert picked.category_id == 4 and picked.severity == 3
+
+
+def test_primary_defect_area_breaks_tie(tmp_path):
+    """R3: 심각도 동률이면 면적 큰 결함 선정 (VQA 출제 규칙과 동일)."""
+    raw = load_stub(STUB_MULTI)
+    for ann, area in zip(raw["annotations"], (70000.0, 150000.0)):
+        ann["severity"] = 2
+        ann["area"] = area
+    doc = parse_label(write_doc(tmp_path, raw))
+    assert primary_defect(doc).area == 150000.0
+
+
+def test_primary_defect_none_for_normal():
+    """R3: 결함 없는 정상 사진 → None."""
+    assert primary_defect(parse_label(STUB_NORMAL)) is None
+
+
+def test_to_crop_coords_translates():
+    """R5: 원본 좌표 → 크롭 좌표 = (x−크롭x, y−크롭y, w·h 그대로)."""
+    got = to_crop_coords((3500.0, 1200.0, 400.0, 250.0), (3082.0, 668.0, 1920.0, 1080.0))
+    assert got == (418.0, 532.0, 400.0, 250.0)
+
+
+def test_to_crop_coords_requires_crop():
+    """R5: cropped_bbox가 None이면 ValueError — None 연산으로 엉뚱한 좌표 방지."""
+    with pytest.raises(ValueError):
+        to_crop_coords((3500.0, 1200.0, 400.0, 250.0), None)
+
+
+def test_to_crop_coords_partial_vs_complete_departure():
+    """R5: 크롭 영역 부분 이탈은 그대로 반환, 완전 이탈(교집합 없음)은 ValueError."""
+    crop = (3082.0, 668.0, 1920.0, 1080.0)
+    # 부분 이탈: bbox가 크롭 왼쪽 경계에 걸침 → 음수 좌표 그대로 반환
+    assert to_crop_coords((3000.0, 600.0, 400.0, 250.0), crop) == (-82.0, -68.0, 400.0, 250.0)
+    # 완전 이탈: 크롭 영역과 겹치지 않음 → 라벨 데이터 오류로 즉시 실패
+    with pytest.raises(ValueError):
+        to_crop_coords((100.0, 100.0, 50.0, 50.0), crop)

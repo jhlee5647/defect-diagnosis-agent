@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _REQUIRED_BLOCKS = ("info", "image", "collection", "categories", "vision_qa")
+_FILENAME_TOKENS = 6  # 풍력: 연도_단지_호기_블레이드_부위_식별번호 (R4)
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,18 @@ class Annotation:
     bbox: tuple[float, float, float, float]
     area: float
     severity: int
+
+
+@dataclass(frozen=True)
+class FilenameMeta:
+    """파일명에 박힌 설비 정보. site는 소문자 정규화 (R4)."""
+
+    year: int
+    site: str
+    unit: int
+    blade: str
+    side: str
+    seq: str
 
 
 @dataclass(frozen=True)
@@ -100,3 +113,43 @@ def parse_label(path: Path) -> LabelDoc:
         vqa=vqa,  # R8: 원본 그대로 보존 (채점기 전용)
         cropped_bbox=cropped_bbox,
     )
+
+
+def parse_filename(filename: str) -> FilenameMeta:
+    """풍력 6토큰 파일명 분해 (R4). 형식 불일치는 ValueError — 스킵 여부는 호출자가 결정."""
+    stem = filename.rsplit(".", 1)[0]
+    tokens = stem.split("_")
+    if len(tokens) != _FILENAME_TOKENS:
+        raise ValueError(f"{filename}: 풍력 파일명은 6토큰이어야 함 — {len(tokens)}토큰 (R4)")
+    year, site, unit, blade, side, seq = tokens
+    try:
+        return FilenameMeta(
+            year=int(year), site=site.lower(), unit=int(unit), blade=blade, side=side, seq=seq
+        )
+    except ValueError as e:
+        raise ValueError(f"{filename}: 연도·호기는 숫자여야 함 (R4)") from e
+
+
+def primary_defect(doc: LabelDoc) -> Annotation | None:
+    """대표 결함 선정 (R3): 심각도 최대 → 동률 시 면적 최대. VQA 출제 규칙과 동일해야 채점이 맞는다."""
+    if not doc.annotations:
+        return None
+    return max(doc.annotations, key=lambda a: (a.severity, a.area))
+
+
+def to_crop_coords(
+    bbox: tuple[float, float, float, float],
+    cropped_bbox: tuple[float, float, float, float] | None,
+) -> tuple[float, float, float, float]:
+    """원본 좌표 bbox → 크롭 좌표 (R5). 채점기(SPEC-06)와 vlm_analyze(SPEC-03)의 공유 구현.
+
+    부분 이탈은 그대로 반환(음수 좌표 허용), 크롭 영역과 교집합이 없으면 라벨 오류로 ValueError.
+    """
+    if cropped_bbox is None:
+        raise ValueError("cropped_bbox가 없는 문서 — 좌표 변환 불가 (R5)")
+    x, y, w, h = bbox
+    cx, cy, cw, ch = cropped_bbox
+    no_overlap = x + w <= cx or x >= cx + cw or y + h <= cy or y >= cy + ch
+    if no_overlap:
+        raise ValueError(f"bbox {bbox}가 크롭 영역 {cropped_bbox}과 겹치지 않음 — 라벨 오류 (R5)")
+    return (x - cx, y - cy, w, h)
