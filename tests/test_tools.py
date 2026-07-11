@@ -8,9 +8,11 @@ import sqlite3
 
 import pytest
 
-from src.config import STUB_DATA_DIR
+import chromadb
+
+from src.config import STUB_DATA_DIR, V2_COLLECTION
 from src.ingest import run_ingest
-from src.tools import history_query
+from src.tools import history_query, knowledge_search, visual_search
 
 
 def fake_image_embedder(images):
@@ -106,3 +108,79 @@ def test_return_includes_query_params(storage):
     result = history_query("sungsan 5호기 이력", db_path=storage / "history.db",
                            sql_generator=canned_sql("SELECT filename FROM inspections"))
     assert result["params"]["question"] == "sungsan 5호기 이력"
+
+
+# ── 사이클 2: T3 knowledge_search ────────────────────────
+
+
+def test_knowledge_search_returns_sourced_snippets(storage):
+    """7. 정상 질의 → {text, source, similarity} k건. 전 항목 출처 필수 + 파라미터 요약 (R7)."""
+    result = knowledge_search("라미네이트 노출 기준", k=3, chroma_dir=storage / "chroma",
+                              text_embedder=fake_text_embedder)
+    assert "error" not in result
+    assert result["count"] == len(result["results"]) == 3
+    for item in result["results"]:
+        assert item["text"], "설명문 본문이 비어 있음"
+        assert ".jpg" in item["source"], "출처 없는 문단 반환 금지"
+        assert -1.0 <= item["similarity"] <= 1.0
+    assert result["params"] == {"query": "라미네이트 노출 기준", "k": 3}
+
+
+def test_knowledge_search_empty_corpus(tmp_path):
+    """8. 빈 코퍼스 질의 → 명시적 '결과 없음' 메시지 (R2 — 지어내기 금지)."""
+    client = chromadb.PersistentClient(path=str(tmp_path / "chroma"))
+    client.create_collection(V2_COLLECTION, metadata={"hnsw:space": "cosine"})
+    result = knowledge_search("아무 질의", chroma_dir=tmp_path / "chroma",
+                              text_embedder=fake_text_embedder)
+    assert result["results"] == [] and result["count"] == 0
+    assert "없음" in result["message"]
+
+
+# ── 사이클 2: T1 visual_search ───────────────────────────
+
+QUERY_IMAGE = STUB_DATA_DIR / "2025_sungsan_5_A_LeadingEdge_001.jpg"
+
+
+def test_visual_search_basic(storage):
+    """9. 기본 검색 → {filename, defect_type, severity, similarity, description} k건."""
+    result = visual_search(QUERY_IMAGE, k=3, chroma_dir=storage / "chroma",
+                           image_embedder=fake_image_embedder)
+    assert "error" not in result
+    assert result["count"] == len(result["results"]) == 3
+    for item in result["results"]:
+        assert set(item) >= {"filename", "defect_type", "severity", "similarity", "description"}
+        assert -1.0 <= item["similarity"] <= 1.0
+    assert result["params"]["k"] == 3
+
+
+def test_visual_search_filters(storage):
+    """10. 필터 재검색(UC-4) — defect_type·severity 필터가 결과를 실제로 좁힌다."""
+    by_type = visual_search(QUERY_IMAGE, k=6, defect_type="Paint Damage",
+                            chroma_dir=storage / "chroma", image_embedder=fake_image_embedder)
+    assert by_type["count"] == 2  # 스텁 001·002 (003의 대표결함은 La Exposure)
+    assert all(i["defect_type"] == "Paint Damage" for i in by_type["results"])
+
+    by_sev = visual_search(QUERY_IMAGE, k=6, severity=3,
+                           chroma_dir=storage / "chroma", image_embedder=fake_image_embedder)
+    assert by_sev["count"] == 2  # 스텁 003(La Exposure)·006(Vortex Generator)
+    assert all(i["severity"] == 3 for i in by_sev["results"])
+
+
+def test_visual_search_returns_fewer_when_corpus_small(storage):
+    """11. k 미달 — 코퍼스(6건)보다 큰 k=50 요청 시 있는 만큼만, 지어내지 않는다."""
+    result = visual_search(QUERY_IMAGE, k=50, chroma_dir=storage / "chroma",
+                           image_embedder=fake_image_embedder)
+    assert result["count"] == 6
+
+
+def test_visual_search_embeds_crop_region(storage):
+    """12. 크롭 영역 (x,y,w,h) 지정 시 그 영역만 임베딩에 들어간다 (원본 통짜 아님)."""
+    seen_sizes = []
+
+    def recording_embedder(images):
+        seen_sizes.extend(img.size for img in images)
+        return [[0.1] * 8 for _ in images]
+
+    visual_search(QUERY_IMAGE, crop=(100, 200, 640, 480), chroma_dir=storage / "chroma",
+                  image_embedder=recording_embedder)
+    assert seen_sizes == [(640, 480)]

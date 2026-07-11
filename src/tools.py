@@ -15,6 +15,18 @@ from pathlib import Path
 
 from src import config
 
+# 임베딩은 인덱싱(SPEC-02)과 반드시 같은 구현이어야 검색이 성립한다 — ingest의 것을 공유
+from src.ingest import _default_image_embedder, _default_text_embedder
+
+
+def _get_collection(chroma_dir: Path, name: str):
+    """조회 전용 Chroma 컬렉션. 도구는 질의 처리 중 V1·V2에 쓰지 않는다 (SPEC-00 §2)."""
+    import chromadb
+
+    client = chromadb.PersistentClient(path=str(chroma_dir))
+    return client.get_collection(name)
+
+
 # ── T2 history_query — "이 설비 기록 보여줘" ──────────────────
 
 _D1_SCHEMA_FOR_LLM = """\
@@ -101,4 +113,107 @@ def history_query(
     result = {"rows": rows, "count": len(rows), "sql": sql, "params": params}
     if not rows:
         result["message"] = "조회 조건에 해당하는 이력 없음"
+    return result
+
+
+# ── T3 knowledge_search — "이 결함 기준이 뭐지?" ──────────────
+
+
+def knowledge_search(
+    query: str,
+    *,
+    k: int = config.TOP_K,
+    chroma_dir: Path = config.CHROMA_DIR,
+    text_embedder=None,
+) -> dict:
+    """T3: 텍스트 질의 → V2에서 유사 설명문 k건. 전 항목에 출처 필수 — 리포트 인용의 재료."""
+    text_embedder = text_embedder or _default_text_embedder
+    params = {"query": query, "k": k}
+
+    try:
+        got = _get_collection(chroma_dir, config.V2_COLLECTION).query(
+            query_embeddings=text_embedder([query]),
+            n_results=k,
+            include=["documents", "metadatas", "distances"],
+        )
+    except Exception as e:
+        return {"error": f"지식 검색 실패: {e}", "params": params}
+
+    results = [
+        {
+            "text": doc,
+            "source": f"{meta['filename']}의 설명문",
+            "similarity": round(1.0 - dist, 4),  # cosine distance → similarity, 가공 없이
+        }
+        for doc, meta, dist in zip(
+            got["documents"][0], got["metadatas"][0], got["distances"][0], strict=True
+        )
+    ]
+    result = {"results": results, "count": len(results), "params": params}
+    if not results:
+        result["message"] = "질의와 유사한 설명문 없음 (코퍼스 결과 0건)"
+    return result
+
+
+# ── T1 visual_search — "이거랑 비슷한 사진 찾아줘" ────────────
+
+
+def _build_v1_filter(defect_type: str | None, severity: int | None) -> dict | None:
+    """결함종류·심각도 필터 → Chroma where 절. 재검색 전략(UC-4)용."""
+    clauses = []
+    if defect_type is not None:
+        clauses.append({"defect_type": defect_type})
+    if severity is not None:
+        clauses.append({"severity": severity})
+    if not clauses:
+        return None
+    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+
+
+def visual_search(
+    image_path: Path,
+    *,
+    k: int = config.TOP_K,
+    defect_type: str | None = None,
+    severity: int | None = None,
+    crop: tuple[float, float, float, float] | None = None,
+    chroma_dir: Path = config.CHROMA_DIR,
+    image_embedder=None,
+) -> dict:
+    """T1: 사진 → CLIP 임베딩 → V1에서 가장 가까운 k건. 유사도는 가공 없이 반환 (판단은 A1)."""
+    image_embedder = image_embedder or _default_image_embedder
+    params = {"image": Path(image_path).name, "k": k,
+              "defect_type": defect_type, "severity": severity, "crop": crop}
+
+    try:
+        from PIL import Image
+
+        img = Image.open(image_path).convert("RGB")
+        if crop is not None:
+            x, y, w, h = crop
+            img = img.crop((int(x), int(y), int(x + w), int(y + h)))
+        got = _get_collection(chroma_dir, config.V1_COLLECTION).query(
+            query_embeddings=image_embedder([img]),
+            n_results=k,
+            where=_build_v1_filter(defect_type, severity),
+            include=["documents", "metadatas", "distances"],
+        )
+    except Exception as e:
+        return {"error": f"유사 사진 검색 실패: {e}", "params": params}
+
+    results = [
+        {
+            "filename": meta["filename"],
+            "defect_type": meta["defect_type"],
+            "severity": meta["severity"],
+            "similarity": round(1.0 - dist, 4),
+            "description": doc,
+        }
+        for doc, meta, dist in zip(
+            got["documents"][0], got["metadatas"][0], got["distances"][0], strict=True
+        )
+    ]
+    result = {"results": results, "count": len(results), "params": params}
+    if not results:
+        result["message"] = "조건에 맞는 유사 사진 없음"
     return result
