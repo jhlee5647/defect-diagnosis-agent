@@ -80,11 +80,18 @@ def _summarize(tool: str, result: dict) -> str:
 
 
 def _digest(evidence: list[dict]) -> list[str]:
-    """evidence 전체의 압축 요약 — select/assess 프롬프트에 들어가는 현황판."""
+    """evidence 전체의 압축 현황판 — select/assess 프롬프트 재료.
+
+    건수만 주면 LLM이 "답이 이미 있는지"를 판단할 수 없어 루프가 공회전한다 —
+    결과 내용을 길이 제한으로 잘라서라도 보여준다.
+    """
     lines = []
     for e in evidence:
         if "tool" in e:
-            lines.append(f"[반복{e['iteration']}] {_summarize(e['tool'], e['result'])}")
+            body = json.dumps(e["result"], ensure_ascii=False, default=str)
+            if len(body) > 600:
+                body = body[:600] + "…(생략)"
+            lines.append(f"[반복{e['iteration']}] {e['tool']} → {body}")
         else:
             lines.append(f"[{e['type']}] {e['content']}")
     return lines
@@ -295,17 +302,22 @@ _STAGE_PROMPTS = {
     ),
     "select": (
         "너는 도구 선택 단계다. needed_info 중 evidence_summary에 아직 없는 정보를 채울 도구를 "
-        "allowed_tools 안에서 최대 2개 고른다. JSON: "
+        "allowed_tools 안에서 고른다. JSON: "
         '{"calls": [{"tool": "이름", "params": {...}, "reason": "선택 이유"}]}. '
+        "질문에 답하는 데 꼭 필요한 도구만 — '혹시 몰라서' 무관한 도구를 얹지 않는다. "
+        "단순 이력 조회는 history_query 1개, 지식 질문은 knowledge_search만으로 끝낸다. "
+        "evidence_summary에 이미 답이 있으면 calls를 빈 배열로 두어라. "
         "도구 파라미터 — visual_search: {k, defect_type, severity, crop} (이미지는 자동 주입) / "
         "history_query: {question: 자연어 조회 조건} / knowledge_search: {query, k} / "
         "vlm_analyze: {question, cropped_bbox, few_shot, compare_image}. "
         "직전과 똑같은 (도구, 파라미터) 재호출은 차단되니 파라미터를 바꿔 다르게 시도하라."
     ),
     "assess": (
-        "너는 충분성 평가 단계다. needed_info 대비 evidence_summary의 빈칸을 확인하고 JSON으로 답한다: "
-        '{"sufficient": true|false, "missing": ["아직 부족한 정보", ...]}. '
-        "모든 필요 정보가 확보됐을 때만 sufficient=true."
+        "너는 충분성 평가 단계다. evidence_summary의 내용으로 질문에 답할 수 있는지 판단해 "
+        'JSON으로 답한다: {"sufficient": true|false, "missing": ["아직 부족한 정보", ...]}. '
+        "질문이 요구한 정보가 evidence에 있으면 sufficient=true — 완벽을 요구하지 마라. "
+        "0건 조회 결과도 '해당 이력 없음'이라는 유효한 답이다. "
+        "이미 시도해서 못 얻은 정보를 missing에 반복해 넣지 마라."
     ),
     "draft": (
         "너는 답안 작성 단계다. evidence에 있는 정보만 사용해 답을 쓴다 — evidence에 없는 "
