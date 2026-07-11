@@ -239,3 +239,76 @@ def test_weak_visual_evidence_escalates():
 
     assert "전문가 확인 필요" in result.answer
     assert llm.payloads("draft")[0]["escalation"] is True
+
+
+# ── 사이클 3: 엣지 케이스 (§6) ───────────────────────────
+
+
+def test_diagnosis_without_image_returns_guidance():
+    """11. 사진 없이 '이 사진 점검해줘' → 도구 호출·루프 없이 이미지 필요 안내."""
+    log = []
+    llm = ScriptedLLM(interpret={"intent": "diagnosis", "output_format": "report",
+                                 "needed_info": ["관찰"]})
+    result = diagnose("이 사진 점검해줘", llm=llm, tools=recording_tools(log))
+
+    assert log == [], "이미지 없는 진단 질의에서 도구가 실행됨"
+    assert llm.payloads("select") == [], "루프에 진입함"
+    assert "첨부" in result.answer
+
+
+def test_consecutive_all_error_iterations_stop_early():
+    """12. 도구가 연속(2회 반복) error만 반환 → 상한(6) 전 조기 종료 + 불충분 명시."""
+    log = []
+    tools = recording_tools(log)
+
+    def broken(**params):
+        log.append(("history_query", params))
+        return {"error": "D1 파일 없음"}
+
+    tools["history_query"] = broken
+    llm = ScriptedLLM(
+        selects=[{"calls": [call("history_query", question=f"조건 변형 {i}")]}
+                 for i in range(10)],
+        assesses=[{"sufficient": False, "missing": ["설비 이력"]}] * 10)
+    result = diagnose("이력 질의", llm=llm, tools=tools)
+
+    assert len(iterations(result)) == 2, "연속 error인데 계속 반복함"
+    assert "근거 불충분" in result.answer
+
+
+def test_report_marks_zero_history_explicitly():
+    """13. 이력 0건 → 리포트 ⑤항에 '이력 없음' 명기 (LLM 초안이 빠뜨려도 강제)."""
+    log = []
+    tools = recording_tools(log)
+
+    def empty_history(**params):
+        log.append(("history_query", params))
+        return {"rows": [], "count": 0, "sql": "SELECT 1",
+                "message": "조회 조건에 해당하는 이력 없음", "params": {}}
+
+    tools["history_query"] = empty_history
+    llm = ScriptedLLM(
+        interpret={"intent": "diagnosis", "output_format": "report",
+                   "needed_info": ["관찰", "이력"]},
+        selects=[{"calls": [call("vlm_analyze", question="관찰"),
+                            call("history_query", question="이력")]}],
+        assesses=[{"sufficient": True, "missing": []}],
+        draft="① Paint Damage ② 앞전 ③ 심각도 2 ④ 유사 사례 ⑤ (누락) ⑥ 재도장 권고")
+    result = diagnose("점검해줘", image_path="2025_sungsan_5_A_LeadingEdge_001.jpg",
+                      llm=llm, tools=tools)
+
+    assert "이력 없음" in result.answer
+
+
+def test_unparseable_filename_noted_in_evidence():
+    """14. 파일명 형식이 아닌 사진 → '이력 조회 불가' note가 evidence에 남는다 (UC-4 재료)."""
+    log = []
+    llm = ScriptedLLM(
+        interpret={"intent": "diagnosis", "output_format": "report", "needed_info": ["관찰"]},
+        selects=[{"calls": [call("vlm_analyze", question="관찰")]}],
+        assesses=[{"sufficient": True, "missing": []}])
+    result = diagnose("문제 있나?", image_path="IMG_1234.jpg",
+                      llm=llm, tools=recording_tools(log))
+
+    notes = [e for e in result.evidence if e.get("type") == "note"]
+    assert any("이력 조회 불가" in n["content"] for n in notes)

@@ -53,6 +53,7 @@ class _State(TypedDict, total=False):
     blocked: list[dict]    # 이번 반복에 차단된 호출 + 사유
     last_calls: list[str]  # 직전 반복 실행 호출의 지문 (R2)
     executed: list[dict]   # 이번 반복 실행 결과 요약 (trace 재료)
+    error_streak: int      # 실행 도구가 전부 error였던 연속 반복 수 (조기 종료 §6)
     sufficient: bool
     missing: list[str]
     answer: str
@@ -154,13 +155,21 @@ def _build_graph(llm, tools):
             except ValueError:
                 evidence.append({"type": "note",
                                  "content": "파일명 형식 아님 — 설비 식별자가 없어 이력 조회 불가"})
-        return {
+        update = {
             "intent": decision.get("intent", "diagnosis"),
             "output_format": decision.get("output_format", "concise"),
             "needed_info": decision.get("needed_info", []),
             "evidence": state["evidence"] + evidence,
             "trace": state["trace"] + [{"stage": "interpret", **decision}],
         }
+        # §6: 이미지가 필요한 의도인데 사진이 없다 — 루프에 들어가지 않고 안내로 종료
+        if update["intent"] in ("diagnosis", "compare") and not state.get("image_path"):
+            update["answer"] = ("이미지가 필요한 질의입니다 — 점검할 사진을 첨부해 주세요. "
+                                "사진 없이 가능한 것은 설비 이력 조회와 결함 기준 질문입니다.")
+        return update
+
+    def route_after_interpret(state: _State) -> str:
+        return END if state.get("answer") else "select"
 
     def select(state: _State) -> dict:
         allowed = _allowed_tools(state)
@@ -202,8 +211,10 @@ def _build_graph(llm, tools):
                              "summary": _summarize(c["tool"], result)})
         # 실행이 없던 반복은 직전 지문 유지 — 같은 호출이 다음 반복에도 계속 차단되게 (R2)
         last = [_fingerprint(c) for c in state["pending"]] or state.get("last_calls", [])
+        all_error = bool(new_evidence) and all("error" in e["result"] for e in new_evidence)
+        streak = state.get("error_streak", 0) + 1 if all_error else 0
         return {"evidence": state["evidence"] + new_evidence,
-                "executed": executed, "last_calls": last}
+                "executed": executed, "last_calls": last, "error_streak": streak}
 
     def assess(state: _State) -> dict:
         iteration = state["iteration"] + 1
@@ -229,6 +240,8 @@ def _build_graph(llm, tools):
     def route_after_assess(state: _State) -> str:
         if state["sufficient"] or state["iteration"] >= config.MAX_ITERATIONS:
             return "finalize"
+        if state.get("error_streak", 0) >= 2:  # §6: 도구가 계속 죽어 있다 — 더 돌아봐야 소용없음
+            return "finalize"
         return "select"
 
     def finalize(state: _State) -> dict:
@@ -241,6 +254,11 @@ def _build_graph(llm, tools):
             "escalation": escalation,
         })
         answer = _enforce_citations(resp.get("draft", ""), state["evidence"])  # R4
+        # §6: 이력 0건은 리포트 ⑤항에 반드시 명기 — LLM 초안이 빠뜨려도 강제
+        zero_history = any(e.get("tool") == "history_query" and e["result"].get("count") == 0
+                           for e in state["evidence"])
+        if state.get("output_format") == "report" and zero_history and "이력 없음" not in answer:
+            answer += "\n\n⑤ 해당 설비 이력: 조회 조건에 해당하는 이력 없음 (0건)"
         if escalation:
             answer = ("⚠ 전문가 확인 필요 — 시각 근거 약함"
                       f"(유사 사례 유사도 전부 {config.SIMILARITY_THRESHOLD} 미만"
@@ -257,7 +275,7 @@ def _build_graph(llm, tools):
     g.add_node("assess", assess)
     g.add_node("finalize", finalize)
     g.add_edge(START, "interpret")
-    g.add_edge("interpret", "select")
+    g.add_conditional_edges("interpret", route_after_interpret, ["select", END])
     g.add_edge("select", "execute")
     g.add_edge("execute", "assess")
     g.add_conditional_edges("assess", route_after_assess, ["select", "finalize"])
