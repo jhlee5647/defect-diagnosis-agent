@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
@@ -93,6 +94,47 @@ def _allowed_tools(state: _State) -> list[str]:
     if state.get("image_path"):
         return list(TOOL_NAMES)
     return [t for t in TOOL_NAMES if t not in IMAGE_TOOLS]
+
+
+_FILENAME_RE = re.compile(r"[\w\-]+\.jpg")
+
+
+def _enforce_citations(draft: str, evidence: list[dict]) -> str:
+    """R4 자기검증: 초안의 파일명 인용을 evidence와 기계 대조 — 없는 인용은 제거·표기.
+
+    검색은 다 잘 해놓고 마지막 작문에서 지어내면 앞의 모든 노력이 무효다 (함정 3).
+    """
+    known = set(_FILENAME_RE.findall(json.dumps(evidence, ensure_ascii=False, default=str)))
+    removed = []
+
+    def check(m: re.Match) -> str:
+        if m.group(0) in known:
+            return m.group(0)
+        removed.append(m.group(0))
+        return "[근거 부족으로 인용 제거]"
+
+    cleaned = _FILENAME_RE.sub(check, draft)
+    if removed:
+        cleaned += f"\n\n[자기검증: evidence에 없는 인용 {len(removed)}건 제거]"
+    return cleaned
+
+
+def _needs_escalation(state: _State) -> bool:
+    """R5: 시각 근거 약함 = 유사도 전부 임계 미달 **그리고** 최근 VLM 확신 low (함정 4).
+
+    틀린 확신보다 정직한 불확실성 — 진단·비교 의도에서만 발동한다.
+    """
+    if state.get("intent") not in ("diagnosis", "compare"):
+        return False
+    sims = [r.get("similarity", 0.0)
+            for e in state["evidence"] if e.get("tool") == "visual_search"
+            for r in e["result"].get("results", [])]
+    confidences = [e["result"].get("confidence")
+                   for e in state["evidence"] if e.get("tool") == "vlm_analyze"
+                   if "error" not in e["result"]]
+    visual_weak = bool(sims) and max(sims) < config.SIMILARITY_THRESHOLD
+    vlm_weak = bool(confidences) and confidences[-1] == "low"
+    return visual_weak and vlm_weak
 
 
 # ── LangGraph 노드 (llm·tools는 diagnose에서 주입) ────────
@@ -191,12 +233,18 @@ def _build_graph(llm, tools):
 
     def finalize(state: _State) -> dict:
         # R7: 종결은 조립만 — 이 노드에는 도구 실행 경로 자체가 없다
+        escalation = _needs_escalation(state)
         resp = llm("draft", {
             "question": state["question"],
             "output_format": state.get("output_format", "concise"),
             "evidence": state["evidence"],
+            "escalation": escalation,
         })
-        answer = resp.get("draft", "")
+        answer = _enforce_citations(resp.get("draft", ""), state["evidence"])  # R4
+        if escalation:
+            answer = ("⚠ 전문가 확인 필요 — 시각 근거 약함"
+                      f"(유사 사례 유사도 전부 {config.SIMILARITY_THRESHOLD} 미만"
+                      " + 관찰 확신 low). 아래는 참고용 소견이다.\n\n") + answer
         if not state.get("sufficient"):
             missing = ", ".join(state.get("missing", [])) or "미확보 정보 있음"
             answer += f"\n\n[근거 불충분: {missing} — 루프 상한 내 확보 실패, 해당 부분은 판단 보류]"

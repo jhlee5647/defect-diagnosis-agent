@@ -161,3 +161,81 @@ def test_at_most_two_tools_per_iteration():
     assert len(log) == 2
     assert [name for name, _ in log] == ["history_query", "knowledge_search"]
     assert iterations(result)[0]["blocked"]
+
+
+# ── 사이클 2: 종결(finalize) ─────────────────────────────
+
+
+def test_finalize_never_executes_tools():
+    """7. R7: 종결 진입 후 어떤 도구도 실행되지 않는다 — 루프에서 1회 실행이 전부."""
+    log = []
+    llm = ScriptedLLM(
+        selects=[{"calls": [call("history_query", question="이력")]}],
+        assesses=[{"sufficient": True, "missing": []}],
+        draft="이력 조회 결과 요약. 추가로 knowledge_search를 호출해 보강하겠다.")
+    result = diagnose("이력 질의", llm=llm, tools=recording_tools(log))
+
+    assert len(log) == 1, "종결 단계에서 도구가 실행됨 (R7 위반)"
+    assert llm.seen[-1][0] == "draft", "draft 이후에 다른 stage가 호출됨"
+    assert result.answer
+
+
+def test_uncited_filename_removed_from_draft():
+    """8. R4: evidence에 없는 파일명 인용은 제거되고 '근거 부족' 표기가 남는다."""
+    log = []
+    fake = "2023_sungsan_9_Z_FakeCase_777.jpg"        # evidence에 없는 지어낸 인용
+    real = "2024_sungsan_5_A_LeadingEdge_002.jpg"     # 페이크 history 결과에 실존
+    llm = ScriptedLLM(
+        selects=[{"calls": [call("history_query", question="이력")]}],
+        assesses=[{"sufficient": True, "missing": []}],
+        draft=f"유사 사례로 {fake}가 있다. 이력상 근거는 {real}이다.")
+    result = diagnose("이력 질의", llm=llm, tools=recording_tools(log))
+
+    assert fake not in result.answer, "지어낸 인용이 살아남음 (R4 위반)"
+    assert real in result.answer, "실존 인용까지 지워짐"
+    assert "근거 부족" in result.answer
+
+
+def test_output_format_routed_by_intent():
+    """9. R8: 진단 의도 → draft에 report 형식 지시 / 조회 의도 → concise 지시."""
+    log = []
+    concise_llm = ScriptedLLM(  # 기본 interpret: history/concise
+        selects=[{"calls": [call("history_query", question="이력")]}],
+        assesses=[{"sufficient": True, "missing": []}])
+    diagnose("이력 질의", llm=concise_llm, tools=recording_tools(log))
+    assert concise_llm.payloads("draft")[0]["output_format"] == "concise"
+
+    report_llm = ScriptedLLM(
+        interpret={"intent": "diagnosis", "output_format": "report",
+                   "needed_info": ["관찰", "유사사례"]},
+        selects=[{"calls": [call("vlm_analyze", question="관찰해줘")]}],
+        assesses=[{"sufficient": True, "missing": []}])
+    diagnose("이 사진 점검해줘", image_path="2025_sungsan_5_A_LeadingEdge_001.jpg",
+             llm=report_llm, tools=recording_tools(log))
+    assert report_llm.payloads("draft")[0]["output_format"] == "report"
+
+
+def test_weak_visual_evidence_escalates():
+    """10. R5: 유사도 전부 임계(0.75) 미달 + VLM 확신 low → '전문가 확인 필요'로 종결."""
+    log = []
+    weak_tools = recording_tools(log)
+    weak_tools["visual_search"] = lambda **p: (log.append(("visual_search", p)) or {
+        "results": [{"filename": "2023_yeongkwang_1_A_SuctionSide_006.jpg",
+                     "defect_type": "Vortex Generator", "severity": 3,
+                     "similarity": 0.55, "description": "와류발생기"}],
+        "count": 1, "params": {}})
+    weak_tools["vlm_analyze"] = lambda **p: (log.append(("vlm_analyze", p)) or {
+        "observation": "확대해도 판별 어려움", "confidence": "low", "params": {}})
+
+    llm = ScriptedLLM(
+        interpret={"intent": "diagnosis", "output_format": "report",
+                   "needed_info": ["관찰", "유사사례"]},
+        selects=[{"calls": [call("vlm_analyze", question="관찰"),
+                            call("visual_search", k=5)]}],
+        assesses=[{"sufficient": True, "missing": []}],
+        draft="관찰과 유사 사례가 모두 약해 확정 판정이 어렵다.")
+    result = diagnose("이 사진 문제 있나?", image_path="unknown_photo.jpg",
+                      llm=llm, tools=weak_tools)
+
+    assert "전문가 확인 필요" in result.answer
+    assert llm.payloads("draft")[0]["escalation"] is True
