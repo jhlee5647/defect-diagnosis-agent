@@ -10,6 +10,9 @@ T4 vlm_analyze(새 사진 직접 관찰 — 시스템의 유일한 눈).
 
 from __future__ import annotations
 
+import base64
+import io
+import json
 import sqlite3
 from pathlib import Path
 
@@ -25,6 +28,12 @@ def _get_collection(chroma_dir: Path, name: str):
 
     client = chromadb.PersistentClient(path=str(chroma_dir))
     return client.get_collection(name)
+
+
+def _crop_xywh(img, bbox: tuple[float, float, float, float]):
+    """(x, y, w, h) — 라벨 좌표 관례(COCO, SPEC-01 R1) — 로 PIL 크롭."""
+    x, y, w, h = bbox
+    return img.crop((int(x), int(y), int(x + w), int(y + h)))
 
 
 # ── T2 history_query — "이 설비 기록 보여줘" ──────────────────
@@ -190,8 +199,7 @@ def visual_search(
 
         img = Image.open(image_path).convert("RGB")
         if crop is not None:
-            x, y, w, h = crop
-            img = img.crop((int(x), int(y), int(x + w), int(y + h)))
+            img = _crop_xywh(img, crop)
         got = _get_collection(chroma_dir, config.V1_COLLECTION).query(
             query_embeddings=image_embedder([img]),
             n_results=k,
@@ -217,3 +225,110 @@ def visual_search(
     if not results:
         result["message"] = "조건에 맞는 유사 사진 없음"
     return result
+
+
+# ── T4 vlm_analyze — "사진을 직접 봐줘" (시스템의 유일한 눈) ──
+
+T4_MAX_SIDE = 1024  # cropped_bbox 없을 때 긴 변 기준 축소 상한 (R5 폴백)
+
+_T4_SYSTEM = (
+    "너는 풍력 블레이드 점검 사진을 관찰하는 검사관이다. 사진에서 보이는 사실만 서술하고 "
+    "보이지 않는 것을 추측하지 않는다. 반드시 JSON으로만 답한다: "
+    '{"observation": "관찰 내용", "confidence": "high|medium|low"}'
+)
+
+
+def _default_vlm_client(messages) -> str:
+    """gpt-4o vision 호출. 테스트는 페이로드를 캡처하는 페이크를 주입한다."""
+    from dotenv import load_dotenv
+    from openai import OpenAI
+
+    load_dotenv()
+    res = OpenAI().chat.completions.create(
+        model=config.VLM_MODEL,
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=messages,
+    )
+    return res.choices[0].message.content or ""
+
+
+def _prepare_vlm_image(image_path: Path, bbox):
+    """R5: cropped_bbox 크롭, 없으면 긴 변 T4_MAX_SIDE 축소본. 원본 통짜 전송 금지."""
+    from PIL import Image
+
+    img = Image.open(image_path).convert("RGB")
+    if bbox is not None:
+        return _crop_xywh(img, bbox)
+    img.thumbnail((T4_MAX_SIDE, T4_MAX_SIDE))
+    return img
+
+
+def _to_image_part(img) -> dict:
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
+
+
+def _few_shot_block(few_shot: list[dict]) -> str:
+    """T1 검색 결과(라벨+설명문)를 텍스트로 주입 — 사례 이미지는 MVP 비포함 (구현 시 확정)."""
+    lines = ["과거 유사 사례 (참고용 라벨·설명문):"]
+    lines += [
+        f"- {c['filename']} ({c['defect_type']}, 심각도 {c['severity']}): {c['description']}"
+        for c in few_shot
+    ]
+    lines.append("위 사례들과 비교해 현재 사진을 관찰하라.")
+    return "\n".join(lines)
+
+
+def vlm_analyze(
+    image_path: Path,
+    question: str,
+    *,
+    cropped_bbox: tuple[float, float, float, float] | None = None,
+    compare_image: Path | None = None,
+    compare_bbox: tuple[float, float, float, float] | None = None,
+    few_shot: list[dict] | None = None,
+    vlm_client=None,
+) -> dict:
+    """T4: 새 사진을 gpt-4o로 직접 관찰. 2장 입력 = 비교 모드(UC-5).
+
+    few-shot 주입: T1의 검색 결과가 관찰의 재료가 되는 연결 — 이 시스템의 핵심 가설.
+    """
+    vlm_client = vlm_client or _default_vlm_client
+    params = {
+        "image": Path(image_path).name,
+        "question": question,
+        "cropped_bbox": cropped_bbox,
+        "compare_image": Path(compare_image).name if compare_image else None,
+        "few_shot_count": len(few_shot) if few_shot else 0,
+    }
+
+    try:
+        text_parts = [question]
+        if few_shot:
+            text_parts.append(_few_shot_block(few_shot))
+        content: list[dict] = [{"type": "text", "text": "\n\n".join(text_parts)}]
+        content.append(_to_image_part(_prepare_vlm_image(image_path, cropped_bbox)))
+        if compare_image is not None:
+            content.append(_to_image_part(_prepare_vlm_image(compare_image, compare_bbox)))
+
+        raw = vlm_client([
+            {"role": "system", "content": _T4_SYSTEM},
+            {"role": "user", "content": content},
+        ])
+    except Exception as e:
+        return {"error": f"VLM 관찰 실패: {e}", "params": params}
+
+    try:
+        parsed = json.loads(raw)
+        observation = parsed["observation"]
+        confidence = parsed.get("confidence", "low")
+        if confidence not in ("high", "medium", "low"):
+            confidence = "low"
+    except (json.JSONDecodeError, TypeError, KeyError):
+        # 지시를 어긴 비JSON 응답 — 관찰은 살리되 신뢰도는 최저로 (R4: 죽지 않는다)
+        observation, confidence = str(raw), "low"
+
+    return {"observation": observation, "confidence": confidence, "params": params}
