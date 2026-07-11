@@ -95,6 +95,9 @@ def _default_image_embedder(images):
     with torch.no_grad():
         inputs = processor(images=images, return_tensors="pt")
         feats = model.get_image_features(**inputs)
+        if not isinstance(feats, torch.Tensor):
+            # transformers 5.x: 출력 객체로 반환 — 투영 임베딩(512d)은 pooler_output
+            feats = feats.pooler_output
         feats = feats / feats.norm(dim=-1, keepdim=True)
     return feats.tolist()
 
