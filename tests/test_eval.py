@@ -1,19 +1,30 @@
 """SPEC-06 — 채점 로직 테스트 (R5: 채점기가 틀리면 모든 숫자가 무의미).
 
-결정적 부분만 검증한다: VQA 파싱, 위치 정답 정합, 응답 파싱, 집계.
+결정적 부분만 검증한다: VQA 파싱, 위치 정답 정합, 응답 파싱, 집계, 하네스 가드.
 VLM 호출·평가 실행은 스모크(--limit 5) 담당.
 """
 
 import dataclasses
 
+import pytest
+
+import chromadb
+
 from eval.run_eval import (
     QuestionResult,
     aggregate,
+    assert_no_leak,
+    build_fewshot_block,
+    build_vqa_prompt,
+    estimate_calls,
+    evaluate_photo,
+    load_eval_docs,
     parse_model_answer,
     parse_vqa,
+    render_report,
     verify_localization_label,
 )
-from src.config import STUB_DATA_DIR
+from src.config import STUB_DATA_DIR, V1_COLLECTION, V2_COLLECTION
 from src.schema import parse_label
 
 DEFECT_DOC = parse_label(STUB_DATA_DIR / "2025_sungsan_5_A_LeadingEdge_001.json")
@@ -92,3 +103,113 @@ def test_aggregate_denominator_excludes_absent_kinds():
     table = aggregate(results)
     assert "localization" not in table["a"]
     assert table["a"]["전체"] == (1, 1)
+
+
+# ── 사이클 2: 하네스 결정 부분 ───────────────────────────
+
+
+def test_leak_precheck_aborts_before_grading(tmp_path):
+    """7. R1: 시험지 파일이 V1에 있으면 채점 시작 전 RuntimeError로 중단."""
+    client = chromadb.PersistentClient(path=str(tmp_path / "chroma"))
+    v1 = client.create_collection(V1_COLLECTION, metadata={"hnsw:space": "cosine"})
+    v1.add(ids=["2025_leak_1_A_LeadingEdge_001.jpg"], embeddings=[[0.1] * 8],
+           documents=["몰래 들어간 시험지"])
+    client.create_collection(V2_COLLECTION, metadata={"hnsw:space": "cosine"})
+
+    with pytest.raises(RuntimeError, match="누수"):
+        assert_no_leak(["2025_leak_1_A_LeadingEdge_001.jpg"], tmp_path / "chroma")
+
+    # 깨끗한 상태면 통과
+    assert_no_leak(["2025_clean_1_A_LeadingEdge_002.jpg"], tmp_path / "chroma")
+
+
+def test_estimate_calls_counts_questions_twice():
+    """8. R6: 예상 VLM 호출 수 = Σ(사진별 문항 수) × 2조건 — 001은 4문항, 005는 1문항."""
+    assert estimate_calls([DEFECT_DOC, NORMAL_DOC]) == (4 + 1) * 2
+
+
+def test_load_eval_docs_respects_limit(tmp_path):
+    """9. R6: --limit 5 → 시험지 목록 앞 5장만 로드."""
+    testset = tmp_path / "testset.txt"
+    names = sorted(p.name for p in STUB_DATA_DIR.glob("*.jpg"))
+    testset.write_text("\n".join(names) + "\n", encoding="utf-8")
+
+    docs = load_eval_docs(STUB_DATA_DIR, testset, limit=5)
+    assert len(docs) == 5
+    assert len(load_eval_docs(STUB_DATA_DIR, testset, limit=None)) == 6
+
+
+def test_eval_prompt_never_contains_eval_filename():
+    """10. R2: (b) 프롬프트에 평가 사진의 파일명 미포함 — D1 우회 컨닝 차단. 과거 사례 파일명은 허용."""
+    fewshot = build_fewshot_block([
+        {"filename": "2024_other_1_A_LeadingEdge_009.jpg", "defect_type": "Paint Damage",
+         "severity": 2, "similarity": 0.8, "description": "도장 박리 사례"}])
+    question = parse_vqa(DEFECT_DOC)[0]
+    prompt = build_vqa_prompt(question, fewshot)
+
+    assert DEFECT_DOC.filename not in prompt
+    assert "2024_other_1_A_LeadingEdge_009.jpg" in prompt
+    assert "한 글자" in prompt  # 응답 형식 강제 문구
+
+
+def test_no_visual_results_runs_without_fewshot():
+    """11. visual_search 0건 → (b)를 few-shot 없이 진행 + 별도 카운트."""
+    counters: dict = {}
+    prompts = []
+
+    def fake_asker(image, prompt):
+        prompts.append(prompt)
+        return "a"
+
+    def empty_searcher(jpg_path, crop):
+        return {"results": [], "count": 0}
+
+    results = evaluate_photo(
+        NORMAL_DOC, STUB_DATA_DIR / "2025_sungsan_2_C_PressureSide_005.jpg",
+        asker=fake_asker, searcher=empty_searcher, counters=counters)
+
+    assert counters["no_fewshot"] == 1
+    assert {r.condition for r in results} == {"a", "b"}
+    assert len(results) == 2  # 정상 사진: 유무 문항 × 2조건
+
+
+def test_missing_cropped_bbox_falls_back_to_thumbnail():
+    """12. cropped_bbox 없는 문서 → 긴 변 축소 폴백(SPEC-03 R5와 동일 규칙) + 별도 카운트."""
+    counters: dict = {}
+    sizes = []
+
+    def fake_asker(image, prompt):
+        sizes.append(image.size)
+        return "b"
+
+    doc = dataclasses.replace(NORMAL_DOC, cropped_bbox=None,
+                              vqa={k: v for k, v in NORMAL_DOC.vqa.items()
+                                   if k != "cropped_bbox"})
+    evaluate_photo(doc, STUB_DATA_DIR / "2025_sungsan_2_C_PressureSide_005.jpg",
+                   asker=fake_asker,
+                   searcher=lambda jpg, crop: {"results": [], "count": 0},
+                   counters=counters)
+
+    assert counters["no_crop"] == 1
+    assert sizes and all(max(s) <= 1024 for s in sizes), "원본 통짜가 VLM에 전달됨"
+
+
+def test_render_report_contains_table_and_routing():
+    """13. 결과 마크다운: 조건×유형 비교표 + 라우팅 판정 + 카운터가 전부 담긴다."""
+    table = aggregate([
+        QuestionResult("a", "detection", True, False),
+        QuestionResult("b", "detection", True, False),
+        QuestionResult("b", "classification", False, True),
+    ])
+    md = render_report(
+        table,
+        routing=[{"uc": "UC-2", "passed": True, "detail": "history만 호출"}],
+        counters={"no_fewshot": 2, "no_crop": 1, "label_error": 0},
+        models={"vlm": "gpt-4o", "image_embed": "clip"})
+
+    assert "| (a)" in md and "| (b)" in md
+    assert "결함유무" in md and "유형판별" in md
+    assert "100%" in md
+    assert "UC-2" in md and "PASS" in md
+    assert "no_fewshot" in md or "few-shot 없이" in md
+    assert "gpt-4o" in md  # 모델 버전 기록 (R3)

@@ -10,11 +10,17 @@ pytest가 아니라 완성된 시스템 전체의 배치 채점이다. 사람이
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
-from src.schema import LabelDoc, primary_defect, to_crop_coords
+from src import config
+from src import tools as toolbox
+from src.schema import LabelDoc, parse_label, primary_defect, to_crop_coords
+
+COST_PER_VLM_CALL_USD = 0.01  # gpt-4o 저해상 이미지+짧은 응답 기준 보수적 추정 (R6 예고용)
 
 # ── VQA 문항 파싱 (결정적 — R5) ───────────────────────────
 
@@ -111,8 +117,189 @@ def aggregate(results: list[QuestionResult]) -> dict:
     return table
 
 
+# ── 하네스 — 가드·로드·실행 ──────────────────────────────
+
+
+def assert_no_leak(testset: list[str], chroma_dir: Path) -> None:
+    """R1: 시험지 파일명이 V1·V2에 하나라도 있으면 채점을 시작조차 하지 않는다."""
+    import chromadb
+
+    client = chromadb.PersistentClient(path=str(chroma_dir))
+    for name in (config.V1_COLLECTION, config.V2_COLLECTION):
+        leaked = client.get_collection(name).get(ids=testset)["ids"]
+        if leaked:
+            raise RuntimeError(f"테스트셋 누수: {name}에 {leaked} — 오염된 시험은 치르지 않는다 (R1)")
+
+
+def load_eval_docs(data_dir: Path, testset_path: Path,
+                   limit: int | None) -> list[tuple[LabelDoc, Path]]:
+    """testset.txt 순서대로 (LabelDoc, 사진 경로) 로드. --limit이면 앞 N장만 (R6)."""
+    names = Path(testset_path).read_text(encoding="utf-8").split()
+    if limit is not None:
+        names = names[:limit]
+    docs = []
+    for name in names:
+        json_name = Path(name).with_suffix(".json").name
+        jp = next(Path(data_dir).rglob(json_name), None)
+        if jp is None:
+            raise FileNotFoundError(f"시험지 라벨 없음: {json_name} (data_dir={data_dir})")
+        docs.append((parse_label(jp), jp.with_suffix(".jpg")))
+    return docs
+
+
+def estimate_calls(docs: list[LabelDoc]) -> int:
+    """R6: 예상 VLM 호출 수 = Σ(사진별 문항 수) × 2조건."""
+    return sum(len(parse_vqa(doc)) for doc in docs) * 2
+
+
+def build_fewshot_block(visual_results: list[dict]) -> str:
+    """(b) 조건 주입 텍스트 — 과거 유사 사례의 라벨·설명문 (T4 few-shot과 같은 발상)."""
+    lines = ["참고 — 과거 유사 점검 사례 (검색 결과):"]
+    lines += [
+        f"- {r['filename']} ({r['defect_type']}, 심각도 {r['severity']}): {r['description']}"
+        for r in visual_results
+    ]
+    lines.append("위 사례들과 비교해 아래 문항에 답하라.")
+    return "\n".join(lines)
+
+
+def build_vqa_prompt(question: Question, fewshot_block: str | None) -> str:
+    """문항 1개의 프롬프트. 평가 사진의 파일명·정답은 절대 넣지 않는다 (R2)."""
+    lines = []
+    if fewshot_block:
+        lines += [fewshot_block, ""]
+    lines.append("점검 사진에 대한 선다형 문항이다. 반드시 보기 글자 하나로만 답하라 "
+                 "(예: a) — 설명 금지, 한 글자만.")
+    lines.append(f"문항: {question.prompt}")
+    lines += [f"{letter}) {text}" for letter, text in sorted(question.options.items())]
+    return "\n".join(lines)
+
+
+def _bump(counters: dict, key: str) -> None:
+    counters[key] = counters.get(key, 0) + 1
+
+
+def evaluate_photo(doc: LabelDoc, jpg_path: Path, *, asker, searcher,
+                   counters: dict) -> list[QuestionResult]:
+    """사진 1장을 (a)·(b) 두 조건으로 채점 — 같은 크롭·같은 문항·같은 순서 (R3).
+
+    asker(크롭 PIL 이미지, 프롬프트) → 모델 응답 텍스트 / searcher(사진 경로, 크롭) → visual_search 반환.
+    둘 다 주입 가능 — 테스트는 페이크, 실행은 gpt-4o·CLIP.
+    """
+    from src.tools import _prepare_vlm_image  # SPEC-03 R5와 동일 규칙 공유 (§5)
+
+    if doc.cropped_bbox is None:
+        _bump(counters, "no_crop")
+    image = _prepare_vlm_image(jpg_path, doc.cropped_bbox)
+
+    questions = parse_vqa(doc)
+    if any(q.kind == "localization" for q in questions) and not verify_localization_label(doc):
+        questions = [q for q in questions if q.kind != "localization"]
+        _bump(counters, "label_error")  # 틀린 정답지로 채점하지 않는다 (게이트 합의)
+
+    visual = searcher(jpg_path, doc.cropped_bbox)
+    found = visual.get("results") or []
+    fewshot = build_fewshot_block(found) if found else None
+    if fewshot is None:
+        _bump(counters, "no_fewshot")
+
+    results = []
+    for condition, block in (("a", None), ("b", fewshot)):
+        for q in questions:
+            letter = parse_model_answer(asker(image, build_vqa_prompt(q, block)))
+            results.append(QuestionResult(
+                condition=condition, kind=q.kind,
+                correct=letter == q.answer, format_fail=letter is None))
+    return results
+
+
+# ── 결과 보고 (R4: 유형별 분해, 불리한 숫자도 그대로) ──────
+
+_KIND_LABELS = (("detection", "결함유무"), ("classification", "유형판별"),
+                ("localization", "위치"), ("analysis", "특징"), ("전체", "전체"))
+_CONDITION_LABELS = {"a": "(a) VLM 단독", "b": "(b) RAG 주입"}
+
+
+def _pct(pair: tuple[int, int] | None) -> str:
+    if not pair:
+        return "—"
+    correct, total = pair
+    return f"{100 * correct / total:.0f}% ({correct}/{total})"
+
+
+def render_report(table: dict, routing: list[dict], counters: dict, models: dict) -> str:
+    """README에 붙일 마크다운 — VQA 비교표 + 라우팅 판정 + 엣지 카운터 + 모델 버전."""
+    lines = ["## 평가 결과 (SPEC-06)", "", "### VQA: (a) VLM 단독 vs (b) 유사사례 few-shot 주입", ""]
+    lines.append("| 조건 | " + " | ".join(label for _, label in _KIND_LABELS) + " |")
+    lines.append("|---|" + "---|" * len(_KIND_LABELS))
+    for cond in ("a", "b"):
+        if cond not in table:
+            continue
+        cells = [_pct(table[cond].get(kind)) for kind, _ in _KIND_LABELS]
+        lines.append(f"| {_CONDITION_LABELS[cond]} | " + " | ".join(cells) + " |")
+    lines.append("")
+    fails = table.get("format_fails", {})
+    lines.append(f"형식실패(오답 처리): (a) {fails.get('a', 0)}건, (b) {fails.get('b', 0)}건 · "
+                 f"few-shot 없이 진행(no_fewshot): {counters.get('no_fewshot', 0)}장 · "
+                 f"크롭 폴백(no_crop): {counters.get('no_crop', 0)}장 · "
+                 f"위치 라벨 오류 제외(label_error): {counters.get('label_error', 0)}장")
+    lines += ["", "### 라우팅 검증 (UC 5종 통과 제약)", ""]
+    if routing:
+        for r in routing:
+            verdict = "PASS" if r["passed"] else "FAIL"
+            lines.append(f"- {r['uc']}: **{verdict}** — {r['detail']}")
+    else:
+        lines.append("- (미실행)")
+    lines += ["", f"모델: {', '.join(f'{k}={v}' for k, v in models.items())}"]
+    return "\n".join(lines)
+
+
 def main():
-    raise SystemExit("평가 하네스는 SPEC-06 사이클 2에서 구현")
+    parser = argparse.ArgumentParser(description="자동 채점기 (SPEC-06)")
+    parser.add_argument("--limit", type=int, default=None, help="처음 N장만 (시험 가동용)")
+    parser.add_argument("--data-dir", type=Path, default=config.DATA_DIR)
+    args = parser.parse_args()
+
+    testset = Path(config.TESTSET_MANIFEST).read_text(encoding="utf-8").split()
+    assert_no_leak(testset, config.CHROMA_DIR)  # R1 — 통과 못 하면 여기서 죽는다
+    docs = load_eval_docs(args.data_dir, config.TESTSET_MANIFEST, args.limit)
+
+    calls = estimate_calls([doc for doc, _ in docs])
+    print(f"대상 {len(docs)}장 / VLM 약 {calls}회 호출 예정 "
+          f"(추정 ${calls * COST_PER_VLM_CALL_USD:.2f})")  # R6
+
+    def asker(image, prompt):
+        # T4의 JSON 모드와 달리 한 글자 응답이 필요해 평가 전용 호출을 쓴다 (모델은 동일 고정)
+        from dotenv import load_dotenv
+        from openai import OpenAI
+
+        from src.tools import _to_image_part
+
+        load_dotenv()
+        res = OpenAI().chat.completions.create(
+            model=config.VLM_MODEL, temperature=0, max_tokens=8,
+            messages=[{"role": "user",
+                       "content": [{"type": "text", "text": prompt}, _to_image_part(image)]}])
+        return res.choices[0].message.content or ""
+
+    def searcher(jpg_path, crop):
+        return toolbox.visual_search(jpg_path, crop=crop, k=config.TOP_K)
+
+    counters: dict = {}
+    results: list[QuestionResult] = []
+    for i, (doc, jpg) in enumerate(docs, 1):
+        results += evaluate_photo(doc, jpg, asker=asker, searcher=searcher, counters=counters)
+        print(f"  [{i}/{len(docs)}] 채점 완료")
+
+    table = aggregate(results)
+    routing: list[dict] = []  # UC 5종 라우팅 검증은 사이클 3에서 연결
+    report = render_report(table, routing, counters, models={
+        "vlm": config.VLM_MODEL, "image_embed": config.IMAGE_EMBED_MODEL,
+        "orchestrator": config.ORCHESTRATOR_MODEL})
+    print("\n" + report)
+    out = Path(__file__).parent / "results.md"
+    out.write_text(report + "\n", encoding="utf-8")
+    print(f"\n저장: {out}")
 
 
 if __name__ == "__main__":
