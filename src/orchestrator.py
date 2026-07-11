@@ -229,6 +229,7 @@ def _build_graph(llm, tools):
         iteration = state["iteration"] + 1
         resp = llm("assess", {
             "question": state["question"],
+            "output_format": state.get("output_format", "concise"),
             "needed_info": state.get("needed_info", []),
             "evidence_summary": _digest(state["evidence"]),
             "iteration": iteration,
@@ -313,6 +314,8 @@ _STAGE_PROMPTS = {
         "질문에 답하는 데 꼭 필요한 도구만 — '혹시 몰라서' 무관한 도구를 얹지 않는다. "
         "단순 이력 조회는 history_query 1개, 지식 질문은 knowledge_search만으로 끝낸다. "
         "진단 의도의 첫 반복은 보통 vlm_analyze(사진 직접 관찰)와 visual_search(과거 유사 사례)다. "
+        "비교 질의('작년보다 심해졌나')는 먼저 history_query로 과거 사진의 file_path를 확보한 뒤, "
+        "vlm_analyze의 compare_image에 그 경로를 넣어 2장 비교한다. "
         "evidence_summary에 이미 답이 있으면 calls를 빈 배열로 두어라.\n"
         "도구 파라미터 (전부 선택 사항 — **확실하지 않은 파라미터는 반드시 생략**, 지어내지 마라):\n"
         '- visual_search: {"k": 정수, "defect_type": 결함 클래스명 필터(예: "Paint Damage", '
@@ -327,7 +330,10 @@ _STAGE_PROMPTS = {
     "assess": (
         "너는 충분성 평가 단계다. evidence_summary의 내용으로 질문에 답할 수 있는지 판단해 "
         'JSON으로 답한다: {"sufficient": true|false, "missing": ["아직 부족한 정보", ...]}. '
-        "질문이 요구한 정보가 evidence에 있으면 sufficient=true — 완벽을 요구하지 마라. "
+        "output_format이 report(진단 리포트)면 리포트 6항목의 재료 — 사진 관찰, 유사 과거 사례, "
+        "설비 이력, 결함 기준 문서 — **각각**이 evidence에 확보되거나 '조회했지만 없음'으로 "
+        "확인되기 전에는 sufficient=false다. 유사 사례가 좋아도 이력·기준 없이 충분 판정 금지. "
+        "concise면 질문이 요구한 정보만 보면 된다 — 완벽을 요구하지 마라. "
         "0건 조회 결과도 '해당 이력 없음'이라는 유효한 답이다. "
         "이미 시도해서 못 얻은 정보를 missing에 반복해 넣지 마라."
     ),

@@ -263,6 +263,19 @@ def test_zero_visual_results_also_escalates():
     assert "전문가 확인 필요" in result.answer
 
 
+def test_assess_payload_includes_output_format():
+    """라우팅 개선: 충분성 평가가 출력 형식을 알아야 '리포트 6항목 재료' 요구가 가능하다."""
+    log = []
+    llm = ScriptedLLM(
+        interpret={"intent": "diagnosis", "output_format": "report", "needed_info": ["관찰"]},
+        selects=[{"calls": [call("vlm_analyze", question="관찰")]}],
+        assesses=[{"sufficient": True, "missing": []}])
+    diagnose("점검해줘", image_path="2025_sungsan_5_A_LeadingEdge_001.jpg",
+             llm=llm, tools=recording_tools(log))
+
+    assert llm.payloads("assess")[0]["output_format"] == "report"
+
+
 # ── 사이클 3: 엣지 케이스 (§6) ───────────────────────────
 
 
