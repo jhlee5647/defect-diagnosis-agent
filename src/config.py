@@ -28,5 +28,5 @@ V1_COLLECTION = "images"     # 대표결함 크롭 임베딩 + 라벨 메타
 V2_COLLECTION = "knowledge"  # 설명문 임베딩 + 출처 메타
 
 # ── 평가 (SPEC-06) ───────────────────────────────────
-TESTSET_SIZE = 50
+TESTSET_SIZE = 20  # 샘플 데이터(풍력 75장) 기준 — 전체 ~1,000장 확보 시 50으로 복원
 TESTSET_SEED = 42
