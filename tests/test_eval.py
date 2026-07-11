@@ -234,6 +234,18 @@ def test_render_report_contains_table_and_routing():
     assert "gpt-4o" in md  # 모델 버전 기록 (R3)
 
 
+def test_uc4_input_picks_rarest_defect_class():
+    """UC-4 입력 선정: 결함 클래스 빈도가 가장 낮은 사진 (동률은 이름순) — 희귀 결함 시나리오 일반화."""
+    from eval.run_eval import _rarest_defect_photo
+
+    docs = [(parse_label(p), p.with_suffix(".jpg")) for p in sorted(STUB_DATA_DIR.glob("*.json"))]
+    doc, jpg = _rarest_defect_photo(docs)
+    # 스텁: Paint Damage 2장, 단일 클래스들(Contamination·La Exposure·Vortex Generator) 동률
+    # → 이름순으로 Contamination(004)
+    assert doc.filename == "2025_gangwon_3_B_TrailingEdge_004.jpg"
+    assert jpg.name == "2025_gangwon_3_B_TrailingEdge_004.jpg"
+
+
 # ── 사이클 3: 라우팅 체커 (R7 — 합성 trace로 검증) ────────
 
 

@@ -301,19 +301,30 @@ def check_routing(uc: str, trace: list[dict], answer: str) -> dict:
     return {"uc": uc, "passed": not problems, "detail": detail}
 
 
+def _rarest_defect_photo(docs: list[tuple[LabelDoc, Path]]) -> tuple[LabelDoc, Path]:
+    """희귀 결함 시나리오(UC-4)용 — 결함 클래스 빈도가 가장 낮은 사진 (동률은 클래스 이름순).
+
+    특정 클래스 고정(예: Vortex Generator)은 그 클래스가 없는 데이터셋에서 무의미해진다.
+    """
+    groups: dict[str, list[tuple[LabelDoc, Path]]] = {}
+    for doc, jpg in docs:
+        main = primary_defect(doc)
+        if main is not None:
+            groups.setdefault(doc.categories[main.category_id], []).append((doc, jpg))
+    if not groups:
+        return docs[0]
+    rarest = min(groups, key=lambda cls: (len(groups[cls]), cls))
+    return groups[rarest][0]
+
+
 def _uc_inputs(docs: list[tuple[LabelDoc, Path]]) -> list[tuple[str, str, Path | None]]:
     """UC 5종의 (질의, 사진) 자동 구성. UC-4 사진은 파일명 없는 무명 사본으로 전달."""
     import shutil
     import tempfile
 
-    def klass(doc: LabelDoc) -> str:
-        main = primary_defect(doc)
-        return doc.categories[main.category_id] if main else "normal"
-
     defects = [(d, p) for d, p in docs if d.annotations]
     uc1_doc, uc1_jpg = defects[0] if defects else docs[0]
-    uc4_doc, uc4_jpg = next(((d, p) for d, p in defects if klass(d) == "Vortex Generator"),
-                            (uc1_doc, uc1_jpg))
+    _, uc4_jpg = _rarest_defect_photo(docs)
     anonymous = Path(tempfile.mkdtemp(prefix="uc4_")) / "unknown_photo.jpg"
     shutil.copy(uc4_jpg, anonymous)
 
