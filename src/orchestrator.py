@@ -128,19 +128,21 @@ def _enforce_citations(draft: str, evidence: list[dict]) -> str:
 
 
 def _needs_escalation(state: _State) -> bool:
-    """R5: 시각 근거 약함 = 유사도 전부 임계 미달 **그리고** 최근 VLM 확신 low (함정 4).
+    """R5: 시각 근거 약함 = 유사 사례가 임계 미달이거나 0건, **그리고** 최근 VLM 확신 low (함정 4).
 
+    0건은 임계 미달보다 더 약한 근거다 (R5 2026-07-11 개정).
     틀린 확신보다 정직한 불확실성 — 진단·비교 의도에서만 발동한다.
     """
     if state.get("intent") not in ("diagnosis", "compare"):
         return False
+    visual_runs = [e for e in state["evidence"]
+                   if e.get("tool") == "visual_search" and "error" not in e["result"]]
     sims = [r.get("similarity", 0.0)
-            for e in state["evidence"] if e.get("tool") == "visual_search"
-            for r in e["result"].get("results", [])]
+            for e in visual_runs for r in e["result"].get("results", [])]
     confidences = [e["result"].get("confidence")
                    for e in state["evidence"] if e.get("tool") == "vlm_analyze"
                    if "error" not in e["result"]]
-    visual_weak = bool(sims) and max(sims) < config.SIMILARITY_THRESHOLD
+    visual_weak = bool(visual_runs) and (not sims or max(sims) < config.SIMILARITY_THRESHOLD)
     vlm_weak = bool(confidences) and confidences[-1] == "low"
     return visual_weak and vlm_weak
 

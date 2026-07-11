@@ -241,6 +241,28 @@ def test_weak_visual_evidence_escalates():
     assert llm.payloads("draft")[0]["escalation"] is True
 
 
+def test_zero_visual_results_also_escalates():
+    """10-2. R5 개정: 유사 사례 0건은 임계 미달보다 약한 근거 — confidence low와 겹치면 에스컬레이션."""
+    log = []
+    empty_tools = recording_tools(log)
+    empty_tools["visual_search"] = lambda **p: (log.append(("visual_search", p)) or {
+        "results": [], "count": 0, "message": "조건에 맞는 유사 사진 없음", "params": {}})
+    empty_tools["vlm_analyze"] = lambda **p: (log.append(("vlm_analyze", p)) or {
+        "observation": "판별 어려움", "confidence": "low", "params": {}})
+
+    llm = ScriptedLLM(
+        interpret={"intent": "diagnosis", "output_format": "report",
+                   "needed_info": ["관찰", "유사사례"]},
+        selects=[{"calls": [call("vlm_analyze", question="관찰"),
+                            call("visual_search", k=5)]}],
+        assesses=[{"sufficient": True, "missing": []}],
+        draft="참고 사례가 전혀 없어 판정 불가.")
+    result = diagnose("이 사진 문제 있나?", image_path="unknown_photo.jpg",
+                      llm=llm, tools=empty_tools)
+
+    assert "전문가 확인 필요" in result.answer
+
+
 # ── 사이클 3: 엣지 케이스 (§6) ───────────────────────────
 
 
