@@ -140,12 +140,13 @@ def run_ingest(
     started = time.monotonic()
     report = IngestReport()
 
-    # 1. 스캔
+    # 1. 스캔 — 라벨과 사진은 병렬 트리일 수 있어 stem 인덱스로 페어링한다 (R8)
     json_paths = sorted(Path(data_dir).rglob("*.json"))
+    jpg_by_stem = {p.stem: p for p in Path(data_dir).rglob("*.jpg")}
     report.total = len(json_paths)
 
     # 2. 파싱 — 깨진 파일은 스킵+사유 (R3), 카테고리 매핑은 파일 간 일관성 검증 (R4)
-    parsed: list[tuple[Path, LabelDoc]] = []
+    parsed: list[tuple[Path, LabelDoc, Path]] = []  # (라벨 경로, 문서, 사진 경로)
     known_categories: dict[int, str] = {}
     for jp in json_paths:
         try:
@@ -154,20 +155,24 @@ def run_ingest(
         except ValueError as e:
             report.skipped.append((jp.name, str(e)))
             continue
+        jpg = jpg_by_stem.get(Path(doc.filename).stem)
+        if jpg is None:
+            report.skipped.append((jp.name, "짝 사진 파일 없음 (R8)"))
+            continue
         for cid, cname in doc.categories.items():
             if known_categories.setdefault(cid, cname) != cname:
                 raise ValueError(
                     f"{jp.name}: categories 매핑 불일치 — id={cid}가 "
                     f"'{known_categories[cid]}'와 '{cname}'로 상충 (R4, 전체 중단)"
                 )
-        parsed.append((jp, doc))
+        parsed.append((jp, doc, jpg))
 
     # 3. 시험지 분리 — 없으면 층화 생성 (R1). 파싱 성공분에서만 뽑는다
     testset_path = Path(testset_path)
     if testset_path.exists():
         testset = testset_path.read_text(encoding="utf-8").split()
     else:
-        testset = select_testset([d for _, d in parsed], n=testset_size, seed=seed)
+        testset = select_testset([d for _, d, _ in parsed], n=testset_size, seed=seed)
         testset_path.parent.mkdir(parents=True, exist_ok=True)
         testset_path.write_text("\n".join(testset) + "\n", encoding="utf-8")
     testset_set = set(testset)
@@ -182,9 +187,9 @@ def run_ingest(
 
     con = sqlite3.connect(db_path)
     con.execute(_D1_DDL)
-    for jp, doc in parsed:  # D1에는 시험지 포함 전부 (R2)
+    for _, doc, jpg in parsed:  # D1에는 시험지 포함 전부 (R2)
         meta = parse_filename(doc.filename)
-        file_path = str(jp.with_suffix(".jpg"))
+        file_path = str(jpg)
         base = (doc.filename, meta.year, meta.site, meta.unit, meta.blade, meta.side)
         if doc.annotations:
             rows = [base + (doc.categories[a.category_id], a.severity, file_path)
@@ -207,14 +212,14 @@ def run_ingest(
     v1 = client.create_collection(config.V1_COLLECTION, metadata={"hnsw:space": "cosine"})
     v2 = client.create_collection(config.V2_COLLECTION, metadata={"hnsw:space": "cosine"})
 
-    indexable = [(jp, doc) for jp, doc in parsed if doc.filename not in testset_set]
+    indexable = [(doc, jpg) for _, doc, jpg in parsed if doc.filename not in testset_set]
     report.testset_excluded = len(parsed) - len(indexable)
     report.indexed = len(indexable)
 
     if indexable:
-        images = [_prepare_v1_image(doc, jp.with_suffix(".jpg")) for jp, doc in indexable]
+        images = [_prepare_v1_image(doc, jpg) for doc, jpg in indexable]
         metadatas = []
-        for _, doc in indexable:
+        for doc, _ in indexable:
             main = primary_defect(doc)
             meta = parse_filename(doc.filename)
             metadatas.append({
@@ -224,16 +229,16 @@ def run_ingest(
                 "site": meta.site, "year": meta.year,
             })
         v1.add(
-            ids=[doc.filename for _, doc in indexable],
+            ids=[doc.filename for doc, _ in indexable],
             embeddings=image_embedder(images),
             metadatas=metadatas,
-            documents=[doc.description for _, doc in indexable],
+            documents=[doc.description for doc, _ in indexable],
         )
         v2.add(
-            ids=[doc.filename for _, doc in indexable],
-            embeddings=text_embedder([doc.description for _, doc in indexable]),
+            ids=[doc.filename for doc, _ in indexable],
+            embeddings=text_embedder([doc.description for doc, _ in indexable]),
             metadatas=[{**m, "source": "caption"} for m in metadatas],
-            documents=[doc.description for _, doc in indexable],
+            documents=[doc.description for doc, _ in indexable],
         )
     report.v1_count = v1.count()
     report.v2_count = v2.count()

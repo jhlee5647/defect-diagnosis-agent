@@ -117,6 +117,32 @@ def test_testset_files_still_in_d1(tmp_path, dataset):
         assert count >= 1, f"{fn}이 D1에 없음"
 
 
+# ── 실데이터 구조 대응 (R8, 2026-07-11 개정) ─────────────
+
+
+def test_parallel_tree_pairing(tmp_path):
+    """R8: 라벨(labels/…)과 사진(raw/…)이 병렬 트리에 있어도 파일명 stem으로 페어링."""
+    data = tmp_path / "data"
+    (data / "labels" / "deep").mkdir(parents=True)
+    (data / "raw" / "other").mkdir(parents=True)
+    for p in STUB_DATA_DIR.iterdir():
+        sub = ("labels", "deep") if p.suffix == ".json" else ("raw", "other")
+        shutil.copy(p, data / sub[0] / sub[1] / p.name)
+
+    report = ingest(tmp_path, data, n=0)
+    assert report.indexed == 6 and not report.skipped
+    for (path,) in d1(tmp_path).execute("SELECT DISTINCT file_path FROM inspections"):
+        assert path.endswith(".jpg") and ("raw" in path), f"사진 경로가 아님: {path}"
+
+
+def test_label_without_photo_is_skipped_with_reason(tmp_path, dataset):
+    """R8: 짝 사진이 없는 라벨은 배치를 죽이지 않고 스킵 목록에 사유와 함께 남는다."""
+    (dataset / "2025_sungsan_5_A_LeadingEdge_001.jpg").unlink()
+    report = ingest(tmp_path, dataset, n=0)
+    assert report.indexed == 5
+    assert any("001" in name and "사진" in reason for name, reason in report.skipped)
+
+
 # ── 사이클 2: 시험지 선정·V1/V2 적재·재구축 ──────────────
 
 
