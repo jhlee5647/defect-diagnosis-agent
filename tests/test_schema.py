@@ -69,8 +69,8 @@ def test_severity_out_of_range_raises(tmp_path):
 
 
 def test_missing_required_block_raises(tmp_path):
-    """R7: vision_qa 또는 categories 블록이 없으면 ValueError."""
-    for missing in ("vision_qa", "categories"):
+    """R7: visionqa 또는 categories 블록이 없으면 ValueError."""
+    for missing in ("visionqa", "categories"):
         raw = load_stub(STUB_SINGLE)
         del raw[missing]
         with pytest.raises(ValueError):
@@ -78,9 +78,9 @@ def test_missing_required_block_raises(tmp_path):
 
 
 def test_vqa_preserved_verbatim():
-    """R8: 파싱 후 vqa dict는 원본 JSON의 vision_qa와 완전히 동일 (가공 금지)."""
+    """R8: 파싱 후 vqa dict는 원본 JSON의 visionqa와 완전히 동일 (가공 금지)."""
     doc = parse_label(STUB_SINGLE)
-    assert doc.vqa == load_stub(STUB_SINGLE)["vision_qa"]
+    assert doc.vqa == load_stub(STUB_SINGLE)["visionqa"]
 
 
 def test_valid_file_parses_all_fields():

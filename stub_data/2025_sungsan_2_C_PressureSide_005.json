@@ -1,84 +1,80 @@
 {
-  "info": {
-    "db_name": "NormalDB",
-    "generator_name": "풍력발전기",
-    "model_name": "Vestas-V80",
-    "part_tag": "Blade C",
-    "part_side_tag": "Pressure Side",
-    "installation": "중기",
-    "license": "㈜어드바이저로렌"
+ "info": {
+  "db_name": "NormalDB",
+  "generator_name": "풍력발전기",
+  "model_name": "Vestas-V80",
+  "part_tag": "Blade C",
+  "part_side_tag": "Pressure Side",
+  "installation": "중기",
+  "license": "㈜어드바이저로렌"
+ },
+ "categories": [
+  {
+   "id": 1,
+   "name": "Contamination",
+   "supercategory": "풍력 외부"
   },
-  "categories": [
-    {
-      "id": 1,
-      "name": "Contamination",
-      "supercategory": "풍력 외부"
-    },
-    {
-      "id": 2,
-      "name": "Tape Damage",
-      "supercategory": "풍력 외부"
-    },
-    {
-      "id": 3,
-      "name": "Paint Damage",
-      "supercategory": "풍력 외부"
-    },
-    {
-      "id": 4,
-      "name": "La Exposure",
-      "supercategory": "풍력 내부"
-    },
-    {
-      "id": 5,
-      "name": "La Damage",
-      "supercategory": "풍력 내부"
-    },
-    {
-      "id": 6,
-      "name": "Bond Crack",
-      "supercategory": "풍력 내부"
-    },
-    {
-      "id": 7,
-      "name": "Receptor Damage",
-      "supercategory": "풍력 부착물"
-    },
-    {
-      "id": 8,
-      "name": "Rain Collar",
-      "supercategory": "풍력 부착물"
-    },
-    {
-      "id": 9,
-      "name": "Vortex Generator",
-      "supercategory": "풍력 부착물"
-    }
-  ],
-  "image": {
-    "id": 105,
-    "width": 8256,
-    "height": 5504,
-    "filename": "2025_sungsan_2_C_PressureSide_005.jpg"
+  {
+   "id": 2,
+   "name": "Tape Damage",
+   "supercategory": "풍력 외부"
   },
-  "collection": {
-    "location": "Sungsan",
-    "datetime": "2025-04-13 11:40:00",
-    "device": "NIKON Z 7",
-    "resolution": "FX",
-    "license": "㈜보다"
+  {
+   "id": 3,
+   "name": "Paint Damage",
+   "supercategory": "풍력 외부"
   },
-  "vision_qa": {
-    "object_description": "블레이드 프레셔사이드 표면에 특기할 결함이 관찰되지 않는 정상 상태이다.",
-    "defect_detection_q": "이미지에 결함이 존재합니까?",
-    "defect_detection_q_option_a": "예",
-    "defect_detection_q_option_b": "아니요",
-    "defect_detection_q_a": "b",
-    "cropped_bbox": [
-      3168,
-      2212,
-      1920,
-      1080
-    ]
+  {
+   "id": 4,
+   "name": "La Exposure",
+   "supercategory": "풍력 내부"
+  },
+  {
+   "id": 5,
+   "name": "La Damage",
+   "supercategory": "풍력 내부"
+  },
+  {
+   "id": 6,
+   "name": "Bond Crack",
+   "supercategory": "풍력 내부"
+  },
+  {
+   "id": 7,
+   "name": "Receptor Damage",
+   "supercategory": "풍력 부착물"
+  },
+  {
+   "id": 8,
+   "name": "Rain Collar",
+   "supercategory": "풍력 부착물"
+  },
+  {
+   "id": 9,
+   "name": "Vortex Generator",
+   "supercategory": "풍력 부착물"
   }
+ ],
+ "image": {
+  "id": 105,
+  "width": 8256,
+  "height": 5504,
+  "filename": "2025_sungsan_2_C_PressureSide_005.jpg"
+ },
+ "collection": {
+  "location": "Sungsan",
+  "datetime": "2025-04-13 11:40:00",
+  "device": "NIKON Z 7",
+  "resolution": "FX",
+  "license": "㈜보다"
+ },
+ "visionqa": {
+  "object_description": "블레이드 프레셔사이드 표면에 특기할 결함이 관찰되지 않는 정상 상태이다.",
+  "defect_detection_q": "이미지에 결함이 존재합니까?",
+  "defect_detection_option": {
+   "detection_option_a": "예",
+   "detection_option_b": "아니요"
+  },
+  "defect_detection_a": "b"
+ }
 }

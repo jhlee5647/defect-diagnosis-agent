@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-_REQUIRED_BLOCKS = ("info", "image", "collection", "categories", "vision_qa")
+_REQUIRED_BLOCKS = ("info", "image", "collection", "categories", "visionqa")
 _FILENAME_TOKENS = 6  # 풍력: 연도_단지_호기_블레이드_부위_식별번호 (R4)
 
 
@@ -87,10 +87,10 @@ def parse_label(path: Path) -> LabelDoc:
         if block not in raw:
             raise ValueError(f"{name}: 필수 블록 '{block}' 누락 (R7)")
 
-    vqa = raw["vision_qa"]
+    vqa = raw["visionqa"]
     description = vqa.get("object_description")
     if not description:
-        raise ValueError(f"{name}: vision_qa.object_description 누락 (R7)")
+        raise ValueError(f"{name}: visionqa.object_description 누락 (R7)")
 
     # R2: annotations 키 부재와 빈 리스트는 모두 정상 사진
     # 오류 메시지의 파일명은 파싱 대상 JSON 경로 기준 (내부 필드가 깨져도 항상 존재)

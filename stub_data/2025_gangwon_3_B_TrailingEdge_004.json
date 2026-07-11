@@ -1,127 +1,135 @@
 {
-  "info": {
-    "db_name": "PositiveDB",
-    "generator_name": "풍력발전기",
-    "model_name": "Vestas-V80",
-    "part_tag": "Blade B",
-    "part_side_tag": "Trailing Edge",
-    "installation": "중기",
-    "license": "㈜어드바이저로렌"
+ "info": {
+  "db_name": "PositiveDB",
+  "generator_name": "풍력발전기",
+  "model_name": "Vestas-V80",
+  "part_tag": "Blade B",
+  "part_side_tag": "Trailing Edge",
+  "installation": "중기",
+  "license": "㈜어드바이저로렌"
+ },
+ "categories": [
+  {
+   "id": 1,
+   "name": "Contamination",
+   "supercategory": "풍력 외부"
   },
-  "categories": [
-    {
-      "id": 1,
-      "name": "Contamination",
-      "supercategory": "풍력 외부"
-    },
-    {
-      "id": 2,
-      "name": "Tape Damage",
-      "supercategory": "풍력 외부"
-    },
-    {
-      "id": 3,
-      "name": "Paint Damage",
-      "supercategory": "풍력 외부"
-    },
-    {
-      "id": 4,
-      "name": "La Exposure",
-      "supercategory": "풍력 내부"
-    },
-    {
-      "id": 5,
-      "name": "La Damage",
-      "supercategory": "풍력 내부"
-    },
-    {
-      "id": 6,
-      "name": "Bond Crack",
-      "supercategory": "풍력 내부"
-    },
-    {
-      "id": 7,
-      "name": "Receptor Damage",
-      "supercategory": "풍력 부착물"
-    },
-    {
-      "id": 8,
-      "name": "Rain Collar",
-      "supercategory": "풍력 부착물"
-    },
-    {
-      "id": 9,
-      "name": "Vortex Generator",
-      "supercategory": "풍력 부착물"
-    }
-  ],
-  "image": {
-    "id": 104,
-    "width": 8256,
-    "height": 5504,
-    "filename": "2025_gangwon_3_B_TrailingEdge_004.jpg"
+  {
+   "id": 2,
+   "name": "Tape Damage",
+   "supercategory": "풍력 외부"
   },
-  "collection": {
-    "location": "Gangwon",
-    "datetime": "2025-06-20 14:02:00",
-    "device": "NIKON Z 7",
-    "resolution": "FX",
-    "license": "㈜보다"
+  {
+   "id": 3,
+   "name": "Paint Damage",
+   "supercategory": "풍력 외부"
   },
-  "vision_qa": {
-    "object_description": "트레일링엣지 표면에 어두운 얼룩 형태의 오염이 관찰된다. 표면 질감 변화 없이 색상만 상이하여 구조적 손상과 구분된다. 심각도 1로 즉각적 조치는 불필요하나 차기 점검 시 변화 여부를 확인할 것.",
-    "defect_detection_q": "이미지에 결함이 존재합니까?",
-    "defect_detection_q_option_a": "예",
-    "defect_detection_q_option_b": "아니요",
-    "defect_detection_q_a": "a",
-    "cropped_bbox": [
-      4600,
-      2700,
-      1920,
-      1080
-    ],
-    "defect_localization_q": "심각도가 가장 높은 결함의 위치는 어디입니까? (crop 좌표계 [x, y, w, h])",
-    "defect_localization_q_option_a": "[400.0, 300.0, 600.0, 400.0]",
-    "defect_localization_q_option_b": "[100.0, 100.0, 600.0, 400.0]",
-    "defect_localization_q_option_c": "[650.0, 300.0, 300.0, 200.0]",
-    "defect_localization_q_option_d": "[400.0, 600.0, 900.0, 400.0]",
-    "defect_localization_q_a": "a",
-    "defect_analysis_q": "해당 결함의 시각적 특징은 무엇입니까?",
-    "defect_analysis_q_option_a": "질감 변화 없이 색상만 어두운 불규칙 얼룩",
-    "defect_analysis_q_option_b": "표면 전체의 균일한 광택 변화",
-    "defect_analysis_q_option_c": "금속 부식으로 인한 갈색 얼룩",
-    "defect_analysis_q_option_d": "빗물 흐름 자국의 수직 줄무늬",
-    "defect_analysis_q_a": "a",
-    "defect_classification_q": "해당 결함의 유형은 무엇입니까?",
-    "defect_classification_q_option_a": "Contamination",
-    "defect_classification_q_option_b": "Paint Damage",
-    "defect_classification_q_option_c": "Bond Crack",
-    "defect_classification_q_option_d": "Rain Collar",
-    "defect_classification_q_a": "a"
+  {
+   "id": 4,
+   "name": "La Exposure",
+   "supercategory": "풍력 내부"
   },
-  "annotations": [
-    {
-      "id": 104001,
-      "image_id": 104,
-      "category_id": 1,
-      "segmentation": [
-        5000,
-        3000,
-        5600,
-        3000,
-        5600,
-        3400,
-        5000,
-        3400
-      ],
-      "area": 240000.0,
-      "bbox": [
-        5000.0,
-        3000.0,
-        600.0,
-        400.0
-      ],
-      "severity": 1
-    }
+  {
+   "id": 5,
+   "name": "La Damage",
+   "supercategory": "풍력 내부"
+  },
+  {
+   "id": 6,
+   "name": "Bond Crack",
+   "supercategory": "풍력 내부"
+  },
+  {
+   "id": 7,
+   "name": "Receptor Damage",
+   "supercategory": "풍력 부착물"
+  },
+  {
+   "id": 8,
+   "name": "Rain Collar",
+   "supercategory": "풍력 부착물"
+  },
+  {
+   "id": 9,
+   "name": "Vortex Generator",
+   "supercategory": "풍력 부착물"
+  }
+ ],
+ "image": {
+  "id": 104,
+  "width": 8256,
+  "height": 5504,
+  "filename": "2025_gangwon_3_B_TrailingEdge_004.jpg"
+ },
+ "collection": {
+  "location": "Gangwon",
+  "datetime": "2025-06-20 14:02:00",
+  "device": "NIKON Z 7",
+  "resolution": "FX",
+  "license": "㈜보다"
+ },
+ "annotations": [
+  {
+   "id": 104001,
+   "image_id": 104,
+   "category_id": 1,
+   "segmentation": [
+    5000,
+    3000,
+    5600,
+    3000,
+    5600,
+    3400,
+    5000,
+    3400
+   ],
+   "area": 240000.0,
+   "bbox": [
+    5000.0,
+    3000.0,
+    600.0,
+    400.0
+   ],
+   "severity": 1
+  }
+ ],
+ "visionqa": {
+  "object_description": "트레일링엣지 표면에 어두운 얼룩 형태의 오염이 관찰된다. 표면 질감 변화 없이 색상만 상이하여 구조적 손상과 구분된다. 심각도 1로 즉각적 조치는 불필요하나 차기 점검 시 변화 여부를 확인할 것.",
+  "defect_detection_q": "이미지에 결함이 존재합니까?",
+  "defect_detection_option": {
+   "detection_option_a": "예",
+   "detection_option_b": "아니요"
+  },
+  "defect_detection_a": "a",
+  "defect_localization_q": "심각도가 가장 높은 결함의 위치는 어디입니까? (crop 좌표계 [x, y, w, h])",
+  "defect_localization_option": {
+   "localization_option_a": "[400,300,600,400]",
+   "localization_option_b": "[100,100,600,400]",
+   "localization_option_c": "[650,300,300,200]",
+   "localization_option_d": "[400,600,900,400]"
+  },
+  "defect_localization_a": "a",
+  "defect_analysis_q": "해당 결함의 시각적 특징은 무엇입니까?",
+  "defect_analysis_option": {
+   "analysis_option_a": "질감 변화 없이 색상만 어두운 불규칙 얼룩",
+   "analysis_option_b": "표면 전체의 균일한 광택 변화",
+   "analysis_option_c": "금속 부식으로 인한 갈색 얼룩",
+   "analysis_option_d": "빗물 흐름 자국의 수직 줄무늬"
+  },
+  "defect_analysis_a": "a",
+  "defect_classification_q": "해당 결함의 유형은 무엇입니까?",
+  "defect_classification_option": {
+   "classification_option_a": "Contamination",
+   "classification_option_b": "Paint Damage",
+   "classification_option_c": "Bond Crack",
+   "classification_option_d": "Rain Collar"
+  },
+  "defect_classification_a": "a",
+  "cropped_bbox": [
+   4600,
+   2700,
+   1920,
+   1080
   ]
+ }
 }

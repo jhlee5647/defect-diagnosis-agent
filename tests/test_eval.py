@@ -63,7 +63,7 @@ def test_localization_answer_matches_shared_coord_transform():
     assert verify_localization_label(DEFECT_DOC) is True
 
     # 정답 키를 다른 보기로 조작 → 정합 실패를 감지해야 함
-    tampered_vqa = {**DEFECT_DOC.vqa, "defect_localization_q_a": "b"}
+    tampered_vqa = {**DEFECT_DOC.vqa, "defect_localization_a": "b"}
     tampered = dataclasses.replace(DEFECT_DOC, vqa=tampered_vqa)
     assert verify_localization_label(tampered) is False
 

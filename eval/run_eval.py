@@ -27,14 +27,13 @@ COST_PER_VLM_CALL_USD = 0.01  # gpt-4o 저해상 이미지+짧은 응답 기준 
 
 # ── VQA 문항 파싱 (결정적 — R5) ───────────────────────────
 
-# 라벨 JSON의 문항 키 접두어 ↔ 채점 표의 문항 유형
+# 라벨 JSON의 문항 키 접두어 ↔ 채점 표의 문항 유형 (실데이터 포맷 — SPEC-01 2026-07-11 개정)
 _QUESTION_KINDS = {
-    "detection": "defect_detection_q",
-    "classification": "defect_classification_q",
-    "localization": "defect_localization_q",
-    "analysis": "defect_analysis_q",
+    "detection": "defect_detection",
+    "classification": "defect_classification",
+    "localization": "defect_localization",
+    "analysis": "defect_analysis",
 }
-_LETTERS = ("a", "b", "c", "d")
 
 
 @dataclass(frozen=True)
@@ -57,38 +56,61 @@ class QuestionResult:
     format_fail: bool
 
 
+def _letter_options(doc: LabelDoc, prefix: str) -> dict[str, str]:
+    """중첩 옵션 dict('detection_option_a': …) → {글자: 보기 본문}."""
+    raw = doc.vqa.get(f"{prefix}_option") or {}
+    return {key.rsplit("_", 1)[-1]: text for key, text in raw.items()}
+
+
 def parse_vqa(doc: LabelDoc) -> list[Question]:
-    """라벨의 vision_qa → 문항 목록. 없는 문항(정상 사진의 위치·유형·특징)은 그냥 빠진다."""
+    """라벨의 visionqa → 문항 목록. 없는 문항(정상 사진의 위치·유형·특징)은 그냥 빠진다."""
     questions = []
     for kind, prefix in _QUESTION_KINDS.items():
-        prompt = doc.vqa.get(prefix)
+        prompt = doc.vqa.get(f"{prefix}_q")
         if not prompt:
             continue
-        options = {
-            letter: doc.vqa[key]
-            for letter in _LETTERS
-            if (key := f"{prefix}_option_{letter}") in doc.vqa
-        }
         questions.append(Question(
-            kind=kind, prompt=prompt, options=options, answer=doc.vqa[f"{prefix}_a"]))
+            kind=kind, prompt=prompt, options=_letter_options(doc, prefix),
+            answer=doc.vqa[f"{prefix}_a"]))
     return questions
 
 
-def verify_localization_label(doc: LabelDoc) -> bool:
-    """위치 문항의 정답 보기 좌표가 to_crop_coords(대표결함 bbox)와 일치하는지 검증.
+def _iou(a: tuple, b: tuple) -> float:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    inter = ix * iy
+    union = aw * ah + bw * bh - inter
+    return inter / union if union > 0 else 0.0
 
-    채점기가 틀린 정답지로 채점하면 모든 숫자가 무의미하다 (함정 2).
+
+def _clamp_to_crop(box: tuple, crop: tuple) -> tuple:
+    """크롭 영역과의 교집합으로 클램프 — 실데이터 위치 정답 보기의 좌표 규칙."""
+    x, y, w, h = box
+    x1, y1 = max(x, 0.0), max(y, 0.0)
+    x2, y2 = min(x + w, crop[2]), min(y + h, crop[3])
+    return (x1, y1, max(x2 - x1, 0.0), max(y2 - y1, 0.0))
+
+
+def verify_localization_label(doc: LabelDoc) -> bool:
+    """위치 정답 정합 검증: 클램프한 to_crop_coords(대표결함) 결과와 IoU 최대 보기 == 정답 키.
+
+    채점기가 틀린 정답지로 채점하면 모든 숫자가 무의미하다 (함정 2). 실데이터 보기 좌표는
+    크롭 교집합으로 클램프된 정수라 등호 대신 IoU로 대조한다 (SPEC-06 2026-07-11 개정).
     불일치 문서의 위치 문항은 '라벨 오류'로 채점에서 제외하고 카운트한다 (게이트 합의).
     """
-    prefix = _QUESTION_KINDS["localization"]
-    answer_key = doc.vqa.get(f"{prefix}_a")
-    raw_option = doc.vqa.get(f"{prefix}_option_{answer_key}")
+    answer_key = doc.vqa.get("defect_localization_a")
+    options = _letter_options(doc, "defect_localization")
     main = primary_defect(doc)
-    if raw_option is None or main is None or doc.cropped_bbox is None:
+    if not answer_key or not options or main is None or doc.cropped_bbox is None:
         return False
-    expected = to_crop_coords(main.bbox, doc.cropped_bbox)
-    labeled = json.loads(raw_option)
-    return all(abs(e - v) < 0.5 for e, v in zip(expected, labeled, strict=True))
+    expected = _clamp_to_crop(
+        to_crop_coords(main.bbox, doc.cropped_bbox), doc.cropped_bbox)
+    ious = {letter: _iou(expected, tuple(json.loads(text)))
+            for letter, text in options.items()}
+    best = max(ious, key=ious.get)  # type: ignore[arg-type]
+    return best == answer_key and ious[best] > 0.3
 
 
 # ── 모델 응답 파싱·집계 (결정적 — R5) ─────────────────────
