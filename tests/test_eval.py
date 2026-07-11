@@ -16,6 +16,7 @@ from eval.run_eval import (
     assert_no_leak,
     build_fewshot_block,
     build_vqa_prompt,
+    check_routing,
     estimate_calls,
     evaluate_photo,
     load_eval_docs,
@@ -213,3 +214,81 @@ def test_render_report_contains_table_and_routing():
     assert "UC-2" in md and "PASS" in md
     assert "no_fewshot" in md or "few-shot 없이" in md
     assert "gpt-4o" in md  # 모델 버전 기록 (R3)
+
+
+# ── 사이클 3: 라우팅 체커 (R7 — 합성 trace로 검증) ────────
+
+
+def make_trace(*call_groups):
+    """반복별 호출 목록으로 합성 trace 생성."""
+    return [{"iteration": i, "reason": ["r"], "calls": list(calls), "blocked": [],
+             "observation": "", "sufficiency": {}}
+            for i, calls in enumerate(call_groups, 1)]
+
+
+def tcall(tool, **params):
+    return {"tool": tool, "params": params}
+
+
+def test_uc2_passes_only_with_history_alone():
+    """14. UC-2: history만 → 통과 / 금지 도구(knowledge 등) 하나라도 → 실패."""
+    ok = check_routing("UC-2", make_trace([tcall("history_query", question="이력")]), "답")
+    assert ok["passed"] is True
+
+    bad = check_routing("UC-2", make_trace(
+        [tcall("history_query", question="이력"), tcall("knowledge_search", query="기준")]), "답")
+    assert bad["passed"] is False
+    assert "금지" in bad["detail"]
+
+
+def test_uc1_requires_all_tools_and_visual_before_fewshot_vlm():
+    """15. UC-1: 4종 전부 + visual이 few-shot 재관찰보다 먼저 → 통과 / 누락·순서 위반 → 실패."""
+    good = check_routing("UC-1", make_trace(
+        [tcall("vlm_analyze", question="관찰"), tcall("visual_search", k=5)],
+        [tcall("vlm_analyze", question="재관찰", few_shot=[{"filename": "x.jpg"}])],
+        [tcall("history_query", question="이력"), tcall("knowledge_search", query="기준")],
+    ), "리포트")
+    assert good["passed"] is True
+
+    missing_vlm = check_routing("UC-1", make_trace(
+        [tcall("visual_search", k=5)],
+        [tcall("history_query", question="이력"), tcall("knowledge_search", query="기준")],
+    ), "리포트")
+    assert missing_vlm["passed"] is False and "필수" in missing_vlm["detail"]
+
+    wrong_order = check_routing("UC-1", make_trace(
+        [tcall("vlm_analyze", question="재관찰", few_shot=[{"filename": "x.jpg"}])],
+        [tcall("visual_search", k=5), tcall("history_query", question="이력")],
+        [tcall("knowledge_search", query="기준")],
+    ), "리포트")
+    assert wrong_order["passed"] is False and "먼저" in wrong_order["detail"]
+
+
+def test_uc4_requires_escalation_ending():
+    """16. UC-4: 필수 3종을 다 불러도 종결이 에스컬레이션이 아니면 실패."""
+    trace = make_trace(
+        [tcall("vlm_analyze", question="관찰"), tcall("visual_search", k=5)],
+        [tcall("knowledge_search", query="와류발생기 기준")],
+    )
+    confident = check_routing("UC-4", trace, "와류발생기 결함으로 확정 진단한다.")
+    assert confident["passed"] is False and "에스컬레이션" in confident["detail"]
+
+    honest = check_routing("UC-4", trace, "⚠ 전문가 확인 필요 — 시각 근거 약함. 참고 소견…")
+    assert honest["passed"] is True
+
+
+def test_uc5_history_must_precede_compare_vlm():
+    """17. UC-5: history(과거 사진 경로 확보)가 2장 비교 vlm보다 뒤면 실패."""
+    bad = check_routing("UC-5", make_trace(
+        [tcall("vlm_analyze", question="관찰")],
+        [tcall("vlm_analyze", question="비교", compare_image="past.jpg")],
+        [tcall("history_query", question="이력")],
+    ), "비교 리포트")
+    assert bad["passed"] is False and "먼저" in bad["detail"]
+
+    good = check_routing("UC-5", make_trace(
+        [tcall("vlm_analyze", question="관찰"), tcall("visual_search", k=5)],
+        [tcall("history_query", question="과거 사진")],
+        [tcall("vlm_analyze", question="비교", compare_image="past.jpg")],
+    ), "비교 리포트")
+    assert good["passed"] is True

@@ -213,6 +213,101 @@ def evaluate_photo(doc: LabelDoc, jpg_path: Path, *, asker, searcher,
     return results
 
 
+# ── 라우팅 채점 (R7: 근거는 trace뿐, 통과 제약만 검사) ─────
+
+# SPEC-04 §5의 UC별 통과 제약. 경로 완전 일치가 아니라 필수/금지/순서만 본다.
+UC_CONSTRAINTS = {
+    "UC-1": {"required": {"visual_search", "history_query", "knowledge_search", "vlm_analyze"},
+             "order": "visual_before_fewshot_vlm"},
+    "UC-2": {"required": {"history_query"},
+             "forbidden": {"vlm_analyze", "visual_search", "knowledge_search"}},
+    "UC-3": {"required": {"knowledge_search"},
+             "forbidden": {"vlm_analyze", "visual_search", "history_query"}},
+    "UC-4": {"required": {"vlm_analyze", "visual_search", "knowledge_search"},
+             "must_escalate": True},  # history 생략이 기대 동작이나 금지는 아님 (§5)
+    "UC-5": {"required": {"vlm_analyze", "history_query"},
+             "order": "history_before_compare_vlm"},
+}
+
+
+def _first_index(calls: list[dict], tool: str) -> int | None:
+    return next((i for i, c in enumerate(calls) if c["tool"] == tool), None)
+
+
+def check_routing(uc: str, trace: list[dict], answer: str) -> dict:
+    """trace의 도구 호출을 UC 통과 제약과 기계 대조 — 같은 로그면 같은 점수 (R7)."""
+    spec = UC_CONSTRAINTS[uc]
+    calls = [c for t in trace if "iteration" in t for c in t["calls"]]
+    tools_called = [c["tool"] for c in calls]
+    problems = []
+
+    missing = spec.get("required", set()) - set(tools_called)
+    if missing:
+        problems.append(f"필수 도구 미호출: {sorted(missing)}")
+    hit = set(tools_called) & spec.get("forbidden", set())
+    if hit:
+        problems.append(f"금지 도구 호출: {sorted(hit)}")
+
+    order = spec.get("order")
+    if order == "visual_before_fewshot_vlm":  # 검색 결과가 재관찰의 재료 (UC-1)
+        first_visual = _first_index(calls, "visual_search")
+        for i, c in enumerate(calls):
+            if c["tool"] == "vlm_analyze" and c["params"].get("few_shot"):
+                if first_visual is None or i < first_visual:
+                    problems.append("few-shot 재관찰이 visual_search보다 먼저 — 순서 위반")
+                break
+    elif order == "history_before_compare_vlm":  # 과거 사진 경로가 비교의 입력 (UC-5)
+        first_history = _first_index(calls, "history_query")
+        for i, c in enumerate(calls):
+            if c["tool"] == "vlm_analyze" and c["params"].get("compare_image"):
+                if first_history is None or i < first_history:
+                    problems.append("2장 비교 호출이 history_query보다 먼저 — 순서 위반")
+                break
+
+    if spec.get("must_escalate") and "전문가 확인 필요" not in answer:
+        problems.append("종결이 에스컬레이션이 아님 — 억지 단정 (SPEC-04 함정 4)")
+
+    detail = "; ".join(problems) if problems else f"호출 순서: {tools_called}"
+    return {"uc": uc, "passed": not problems, "detail": detail}
+
+
+def _uc_inputs(docs: list[tuple[LabelDoc, Path]]) -> list[tuple[str, str, Path | None]]:
+    """UC 5종의 (질의, 사진) 자동 구성. UC-4 사진은 파일명 없는 무명 사본으로 전달."""
+    import shutil
+    import tempfile
+
+    def klass(doc: LabelDoc) -> str:
+        main = primary_defect(doc)
+        return doc.categories[main.category_id] if main else "normal"
+
+    defects = [(d, p) for d, p in docs if d.annotations]
+    uc1_doc, uc1_jpg = defects[0] if defects else docs[0]
+    uc4_doc, uc4_jpg = next(((d, p) for d, p in defects if klass(d) == "Vortex Generator"),
+                            (uc1_doc, uc1_jpg))
+    anonymous = Path(tempfile.mkdtemp(prefix="uc4_")) / "unknown_photo.jpg"
+    shutil.copy(uc4_jpg, anonymous)
+
+    return [
+        ("UC-1", f"이 사진 점검해줘. 파일명 {uc1_doc.filename}", uc1_jpg),
+        ("UC-2", "성산 5호기 A블레이드 심각도 3 이상 이력 보여줘", None),
+        ("UC-3", "라미네이트 노출을 방치하면 어떻게 되나? 심각도 등급의 의미도 알려줘.", None),
+        ("UC-4", "이 사진에 문제 있나?", anonymous),
+        ("UC-5", f"이 설비, 작년보다 심해졌나? 파일명 {uc1_doc.filename}", uc1_jpg),
+    ]
+
+
+def run_routing_checks(docs: list[tuple[LabelDoc, Path]]) -> list[dict]:
+    """UC 5종을 diagnose()로 실제 실행하고 trace를 통과 제약과 대조."""
+    from src.orchestrator import diagnose
+
+    results = []
+    for uc, question, image in _uc_inputs(docs):
+        print(f"  라우팅 {uc} 실행 중…")
+        r = diagnose(question, image_path=image)
+        results.append(check_routing(uc, r.trace, r.answer))
+    return results
+
+
 # ── 결과 보고 (R4: 유형별 분해, 불리한 숫자도 그대로) ──────
 
 _KIND_LABELS = (("detection", "결함유무"), ("classification", "유형판별"),
@@ -292,7 +387,7 @@ def main():
         print(f"  [{i}/{len(docs)}] 채점 완료")
 
     table = aggregate(results)
-    routing: list[dict] = []  # UC 5종 라우팅 검증은 사이클 3에서 연결
+    routing = run_routing_checks(docs)
     report = render_report(table, routing, counters, models={
         "vlm": config.VLM_MODEL, "image_embed": config.IMAGE_EMBED_MODEL,
         "orchestrator": config.ORCHESTRATOR_MODEL})
