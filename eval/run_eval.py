@@ -158,17 +158,22 @@ def assert_no_leak(testset: list[str], chroma_dir: Path) -> None:
 
 def load_eval_docs(data_dir: Path, testset_path: Path,
                    limit: int | None) -> list[tuple[LabelDoc, Path]]:
-    """testset.txt 순서대로 (LabelDoc, 사진 경로) 로드. --limit이면 앞 N장만 (R6)."""
+    """testset.txt 순서대로 (LabelDoc, 사진 경로) 로드. --limit이면 앞 N장만 (R6).
+
+    라벨과 사진은 병렬 트리일 수 있어 stem 인덱스로 페어링한다 (SPEC-02 R8과 동일 규칙).
+    """
     names = Path(testset_path).read_text(encoding="utf-8").split()
     if limit is not None:
         names = names[:limit]
+    json_by_stem = {p.stem: p for p in Path(data_dir).rglob("*.json")}
+    jpg_by_stem = {p.stem: p for p in Path(data_dir).rglob("*.jpg")}
     docs = []
     for name in names:
-        json_name = Path(name).with_suffix(".json").name
-        jp = next(Path(data_dir).rglob(json_name), None)
-        if jp is None:
-            raise FileNotFoundError(f"시험지 라벨 없음: {json_name} (data_dir={data_dir})")
-        docs.append((parse_label(jp), jp.with_suffix(".jpg")))
+        stem = Path(name).stem
+        jp, jpg = json_by_stem.get(stem), jpg_by_stem.get(stem)
+        if jp is None or jpg is None:
+            raise FileNotFoundError(f"시험지 라벨/사진 없음: {stem} (data_dir={data_dir})")
+        docs.append((parse_label(jp), jpg))
     return docs
 
 

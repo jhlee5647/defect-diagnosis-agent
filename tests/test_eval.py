@@ -140,6 +140,24 @@ def test_load_eval_docs_respects_limit(tmp_path):
     assert len(load_eval_docs(STUB_DATA_DIR, testset, limit=None)) == 6
 
 
+def test_load_eval_docs_pairs_across_parallel_trees(tmp_path):
+    """9-2. 라벨과 사진이 병렬 트리여도 stem으로 페어링 (SPEC-02 R8과 동일 규칙)."""
+    import shutil
+
+    data = tmp_path / "data"
+    (data / "labels").mkdir(parents=True)
+    (data / "raw").mkdir(parents=True)
+    for p in STUB_DATA_DIR.iterdir():
+        shutil.copy(p, data / ("labels" if p.suffix == ".json" else "raw") / p.name)
+    testset = tmp_path / "testset.txt"
+    testset.write_text(DEFECT_DOC.filename + "\n", encoding="utf-8")
+
+    docs = load_eval_docs(data, testset, limit=None)
+    assert len(docs) == 1
+    _, jpg_path = docs[0]
+    assert jpg_path.exists() and "raw" in str(jpg_path)
+
+
 def test_eval_prompt_never_contains_eval_filename():
     """10. R2: (b) 프롬프트에 평가 사진의 파일명 미포함 — D1 우회 컨닝 차단. 과거 사례 파일명은 허용."""
     fewshot = build_fewshot_block([
