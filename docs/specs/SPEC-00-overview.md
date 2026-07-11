@@ -46,7 +46,7 @@
 ├── pyproject.toml, README.md, .env(비커밋), .gitignore, CLAUDE.md
 ├── docs/specs/SPEC-00~06.md, docs/adr/ADR-001~005.md
 ├── src/config.py, schema.py, ingest.py, tools.py, orchestrator.py, demo.py
-├── eval/run_eval.py, eval/testset.txt
+├── eval/run_eval.py, eval/testset.txt, eval/results.md  # results.md = 평가 결과표 (SPEC-06 §3 산출물)
 ├── tests/test_schema.py, test_ingest.py, test_tools.py, test_orchestrator.py, test_eval.py
 ├── stub_data/   # 개발용 스텁 (커밋), data/  # 실데이터 (비커밋), storage/  # 산출물 (비커밋)
 ```
