@@ -298,18 +298,28 @@ _STAGE_PROMPTS = {
         "너는 풍력 점검 진단 에이전트의 해석 단계다. 질문과 이미지 유무를 보고 JSON으로 답한다: "
         '{"intent": "diagnosis|history|knowledge|compare", "output_format": "report|concise", '
         '"needed_info": ["답에 필요한 정보 항목", ...]}. '
-        "이미지 진단·비교는 report, 이력·지식 질문은 concise."
+        "이미지 진단·비교는 report, 이력·지식 질문은 concise. "
+        "진단(report) 의도의 needed_info는 리포트 6항목의 재료인 "
+        '["사진 관찰", "유사 과거 사례", "설비 이력", "결함 기준 문서"]를 기본으로 한다 — '
+        "조회·지식 의도는 질문이 요구한 항목만."
     ),
     "select": (
         "너는 도구 선택 단계다. needed_info 중 evidence_summary에 아직 없는 정보를 채울 도구를 "
         "allowed_tools 안에서 고른다. JSON: "
         '{"calls": [{"tool": "이름", "params": {...}, "reason": "선택 이유"}]}. '
+        '각 call의 "reason"은 반드시 한 문장으로 채운다 — "지금 어떤 정보가 모자라서 이 도구인가". '
         "질문에 답하는 데 꼭 필요한 도구만 — '혹시 몰라서' 무관한 도구를 얹지 않는다. "
         "단순 이력 조회는 history_query 1개, 지식 질문은 knowledge_search만으로 끝낸다. "
-        "evidence_summary에 이미 답이 있으면 calls를 빈 배열로 두어라. "
-        "도구 파라미터 — visual_search: {k, defect_type, severity, crop} (이미지는 자동 주입) / "
-        "history_query: {question: 자연어 조회 조건} / knowledge_search: {query, k} / "
-        "vlm_analyze: {question, cropped_bbox, few_shot, compare_image}. "
+        "진단 의도의 첫 반복은 보통 vlm_analyze(사진 직접 관찰)와 visual_search(과거 유사 사례)다. "
+        "evidence_summary에 이미 답이 있으면 calls를 빈 배열로 두어라.\n"
+        "도구 파라미터 (전부 선택 사항 — **확실하지 않은 파라미터는 반드시 생략**, 지어내지 마라):\n"
+        '- visual_search: {"k": 정수, "defect_type": 결함 클래스명 필터(예: "Paint Damage", '
+        '"La Exposure" — 결과를 좁힐 때만), "severity": 1~4 정수 필터, '
+        '"crop": [x,y,w,h] 숫자 좌표(원본 픽셀)} — 사진은 자동 주입, 첫 검색은 파라미터 없이 시작하라\n'
+        '- history_query: {"question": "자연어 조회 조건 (예: sungsan 5호기 A블레이드 이력)"}\n'
+        '- knowledge_search: {"query": "검색 문장", "k": 정수}\n'
+        '- vlm_analyze: {"question": "관찰 지시문", "few_shot": [visual_search 결과 항목 그대로], '
+        '"compare_image": "과거 사진 경로(2장 비교 시)"} — 사진은 자동 주입\n'
         "직전과 똑같은 (도구, 파라미터) 재호출은 차단되니 파라미터를 바꿔 다르게 시도하라."
     ),
     "assess": (
